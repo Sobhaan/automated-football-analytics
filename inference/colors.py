@@ -51,5 +51,11 @@ black = {
     "lower_hsv": (0, 0, 0),
     "upper_hsv": (179, 255, 49),
 }
+brown = {
+    "name": "brown",
+    # Brown is tricky - often low Saturation Orange/Red with medium Value
+    "lower_hsv": (5, 60, 40),
+    "upper_hsv": (20, 180, 150),
+}
 
-all = [white, red, orange, yellow, green, sky_blue, blue, blueish_red, black]
+all = [white, red, orange, yellow, green, sky_blue, blue, blueish_red, black, brown]

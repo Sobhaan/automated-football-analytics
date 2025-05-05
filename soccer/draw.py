@@ -398,8 +398,11 @@ class Draw:
 
         if font is None:
             font = PIL.ImageFont.truetype("fonts/Gidole-Regular.ttf", size=24)
+        text_bbox = draw.textbbox((0, 0), text, font=font)
 
-        w, h = draw.textsize(text, font=font)
+        w = text_bbox[2] - text_bbox[0]  # width = right - left
+        h = text_bbox[3] - text_bbox[1]  # height = bottom - top
+
         text_origin = (
             origin[0] + width / 2 - w / 2,
             origin[1] + height / 2 - h / 2,

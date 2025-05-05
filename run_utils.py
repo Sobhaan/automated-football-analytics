@@ -5,12 +5,12 @@ import numpy as np
 from norfair import Detection
 from norfair.camera_motion import MotionEstimator
 
-from inference import Converter, YoloV5
+from inference import Converter, YoloV8
 from soccer import Ball, Match
 
 
 def get_ball_detections(
-    ball_detector: YoloV5, frame: np.ndarray
+    ball_detector: YoloV8, frame: np.ndarray
 ) -> List[norfair.Detection]:
     """
     Uses custom Yolov5 detector in order
@@ -30,12 +30,12 @@ def get_ball_detections(
         List of ball detections
     """
     ball_df = ball_detector.predict(frame)
-    ball_df = ball_df[ball_df["confidence"] > 0.3]
+    ball_df = ball_df[ball_df["confidence"] > 0.1]
     return Converter.DataFrame_to_Detections(ball_df)
 
 
 def get_player_detections(
-    person_detector: YoloV5, frame: np.ndarray
+    person_detector: YoloV8, frame: np.ndarray
 ) -> List[norfair.Detection]:
     """
     Uses YoloV5 Detector in order to detect the players
@@ -56,8 +56,8 @@ def get_player_detections(
     """
 
     person_df = person_detector.predict(frame)
-    person_df = person_df[person_df["name"] == "person"]
-    person_df = person_df[person_df["confidence"] > 0.35]
+    person_df = person_df[person_df["name"] == "soccer-player"]
+    person_df = person_df[person_df["confidence"] > 0.35] 
     person_detections = Converter.DataFrame_to_Detections(person_df)
     return person_detections
 
@@ -84,7 +84,7 @@ def create_mask(frame: np.ndarray, detections: List[norfair.Detection]) -> np.nd
         mask = np.ones(frame.shape[:2], dtype=frame.dtype)
     else:
         detections_df = Converter.Detections_to_DataFrame(detections)
-        mask = YoloV5.generate_predictions_mask(detections_df, frame, margin=40)
+        mask = YoloV8.generate_predictions_mask(detections_df, frame, margin=40)
 
     # remove goal counter
     mask[69:200, 160:510] = 0

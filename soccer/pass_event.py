@@ -11,11 +11,15 @@ from soccer.team import Team
 
 class Pass:
     def __init__(
-        self, start_ball_bbox: np.ndarray, end_ball_bbox: np.ndarray, team: Team
+        self, start_ball_bbox: np.ndarray, end_ball_bbox: np.ndarray, team: Team,
+        receiver_id: int,        
+        initiation_frame: int
     ) -> None:
         # Abs coordinates
         self.start_ball_bbox = start_ball_bbox
         self.end_ball_bbox = end_ball_bbox
+        self.receiver_id = receiver_id          
+        self.initiation_frame = initiation_frame
         self.team = team
         self.draw_abs = AbsolutePath()
 
@@ -215,7 +219,7 @@ class PassEvent:
         self.player_with_ball_threshold = 3
         self.player_with_ball_threshold_dif_team = 4
 
-    def update(self, closest_player: Player, ball: Ball) -> None:
+    def update(self, closest_player: Player, ball: Ball, frame_idx: int) -> None:
         """
         Updates the player with the ball counter
 
@@ -228,6 +232,7 @@ class PassEvent:
         """
         self.ball = ball
         self.closest_player = closest_player
+        self.current_frame_idx = frame_idx
 
         same_id = Player.have_same_id(self.init_player_with_ball, closest_player)
 
@@ -262,7 +267,9 @@ class PassEvent:
         return True
 
     def generate_pass(
-        self, team: Team, start_pass: np.ndarray, end_pass: np.ndarray
+        self, team: Team, start_pass: np.ndarray, end_pass: np.ndarray,
+        receiver_id: int,       
+        initiation_frame: int   
     ) -> Pass:
         """
         Generate a new pass
@@ -287,6 +294,8 @@ class PassEvent:
             start_ball_bbox=start_pass_bbox,
             end_ball_bbox=end_pass,
             team=team,
+            receiver_id=receiver_id,          
+            initiation_frame=initiation_frame
         )
 
         return new_pass
@@ -308,13 +317,20 @@ class PassEvent:
             if valid_pass:
                 # Generate new pass
                 team = self.closest_player.team
+                if team is None or self.ball.detection is None:
+                    print("No team found for the player")
+                    return
                 start_pass = self.last_player_with_ball.closest_foot_to_ball_abs(
                     self.ball
                 )
                 end_pass = self.ball.detection.absolute_points
+                receiver_id = self.closest_player.detection.data.get("id")
+                init_frame = self.current_frame_idx
 
                 new_pass = self.generate_pass(
-                    team=team, start_pass=start_pass, end_pass=end_pass
+                    team=team, start_pass=start_pass, end_pass=end_pass,
+                    receiver_id=receiver_id,          
+                    initiation_frame=init_frame
                 )
                 team.passes.append(new_pass)
             else:

@@ -42,7 +42,7 @@ class Match:
         # Pass detection
         self.pass_event = PassEvent()
 
-    def update(self, players: List[Player], ball: Ball):
+    def update(self, players: List[Player], ball: Ball, frame_idx: int):
         """
 
         Update match possession and closest player
@@ -57,7 +57,7 @@ class Match:
 
         self.update_possession()
 
-        if ball is None or ball.detection is None:
+        if ball is None or ball.detection is None or len(players)==0:
             self.closest_player = None
             return
 
@@ -87,7 +87,7 @@ class Match:
             self.change_team(self.current_team)
 
         # Pass detection
-        self.pass_event.update(closest_player=closest_player, ball=ball)
+        self.pass_event.update(closest_player=closest_player, ball=ball, frame_idx=frame_idx)
 
         self.pass_event.process_pass()
 
