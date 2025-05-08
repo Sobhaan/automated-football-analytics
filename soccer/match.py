@@ -72,7 +72,8 @@ class Match:
         if ball_distance > self.ball_distance_threshold:
             self.closest_player = None
             return
-
+        
+        self.pass_event.update(closest_player=closest_player, ball=ball, frame_idx=frame_idx)
         # Reset counter if team changed
         if closest_player.team != self.current_team:
             self.possession_counter = 0
@@ -87,7 +88,7 @@ class Match:
             self.change_team(self.current_team)
 
         # Pass detection
-        self.pass_event.update(closest_player=closest_player, ball=ball, frame_idx=frame_idx)
+        
 
         self.pass_event.process_pass()
 

@@ -11,6 +11,7 @@ class YoloV8(BaseDetector):
     def __init__(
         self,
         model_path: str = None,
+        conf: float = 0.1,
     ):
         """
         Initialize detector
@@ -21,7 +22,7 @@ class YoloV8(BaseDetector):
             Path to model, by default None. If it's None, it will download the model with COCO weights
         """
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        print(self.device)
+        self.conf = conf
 
         if model_path:
             self.model = YOLO(model_path)
@@ -45,7 +46,7 @@ class YoloV8(BaseDetector):
             DataFrame containing the bounding boxes
         """
 
-        result = self.model(input_image, imgsz=1280, device=self.device)
+        result = self.model(input_image, imgsz=1280, device=self.device, conf=self.conf)
 
         if result and len(result) > 0:
             results_obj = result[0]  # Get the Results object for the first image

@@ -92,6 +92,10 @@ class Converter:
 
             name = detection.data["name"]
             confidence = detection.data["p"]
+            try:
+                id = detection.data["id"]
+            except KeyError:
+                id = None
 
             data = {
                 "xmin": [xmin],
@@ -100,6 +104,7 @@ class Converter:
                 "ymax": [ymax],
                 "name": [name],
                 "confidence": [confidence],
+                "id": id,
             }
 
             # get color if its in data
