@@ -9,6 +9,7 @@ from soccer.draw import Draw
 from soccer.pass_event import Pass, PassEvent
 from soccer.player import Player
 from soccer.team import Team
+import time
 
 
 class Match:
@@ -55,7 +56,11 @@ class Match:
             Ball
         """
 
+        self.update_pressure(
+            players=players, frame_idx=frame_idx)
+        
         self.update_possession()
+            
         if ball is None or ball.detection is None or len(players)==0:
             self.closest_player = None
             return
@@ -89,6 +94,38 @@ class Match:
         
 
         self.pass_event.process_pass()
+
+        # Update pressure recursively
+        # reciever_pass = self.pass_event.receiver_id()
+        # init_frame_pass = self.pass_event.initiation_frame()
+        
+        
+    def update_pressure(self, players: List[Player], frame_idx: int):
+        """
+        Update pressure of players
+
+        Parameters
+        ----------
+        players : List[Player]
+            List of players
+        """
+
+        # for players in active_players.values():
+        #     print(players)
+        # asdadsdsadsasdsdsadsaddsasad
+        for player in players:
+            player.pressure = "No Pressure"
+            for opponent in players:
+                if player.team != opponent.team:
+                    distance = player.distance_to_player(opponent)
+                    if distance < 50 :
+                        player.pressure = "High Pressure"
+                    elif distance < 150 and player.pressure != "High Pressure":
+                        player.pressure = "Medium Pressure"
+                    elif distance < 300 and player.pressure != "Medium Pressure" and player.pressure != "High Pressure":
+                        player.pressure = "Low Pressure"
+                    elif player.pressure != "Low Pressure" and player.pressure != "Medium Pressure" and player.pressure != "High Pressure":
+                        player.pressure = "No Pressure"                    
 
     def change_team(self, team: Team):
         """

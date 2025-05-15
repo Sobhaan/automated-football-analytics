@@ -76,12 +76,12 @@ parser.add_argument(
     "--automatic_teams", default=True, type=str, help="Enable automatic team color detection"
 )
 parser.add_argument(
-    "--pressure", default=False, type=str, help="Enable pressure detection"
+    "--pressure", default=True, type=str, help="Enable pressure detection"
 )
 
 parser.add_argument( 
     "--output", 
-    default="output/nas2s.mp4", # Default output name
+    default="output/pressurna2222s.mp4", # Default output name
     type=str, 
     help="Path for output video file"
 )
@@ -307,14 +307,13 @@ try:
 
         if args.automatic_teams:
             players = Player.from_detections(detections=player_detections, teams=teams)
-            match.update(players, ball, i)
-            pass_list = match.passes
-            passes_list = match.passes
         else:
             players = Player.from_detections(detections=player_detections_tracked, teams=teams)
-            match.update(players, ball, i)
-            pass_list = match.passes
-            passes_list = match.passes
+
+        match.update(players, ball, i)
+        pass_list = match.passes
+        passes_list = match.passes
+
 
         # 8. Draw Visualizations
         frame_final = frame_np # Default to original frame if drawing fails
@@ -327,11 +326,17 @@ try:
             players=list(active_players.values()),
             frame=frame_pil,
             id=True,
-            draw_orientation=True, # Master switch
-            draw_head_orientation=True, # Draw head orientation if scanning
+            draw_orientation=body_orientation, # Master switch
+            draw_head_orientation=scanning, # Draw head orientation if scanning
             target_player_id=args.target_id, # Pass target ID
         )
 
+        if args.pressure:
+            frame_pil = Player.draw_pressure(
+                players=players,
+                frame=frame_pil,
+                target_id=args.target_id,
+            )
         # Draw ball (optional)
         if ball:
             # Ensure ball.draw handles PIL Image and RGB color

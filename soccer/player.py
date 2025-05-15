@@ -59,6 +59,7 @@ class Player:
         self.keypoints = None # Store absolute keypoints [K, 3] numpy array or None
         self.orientation = "Unknown" # Store raw orientation string
         self.smoothed_orientation = "Unknown" # Store smoothed orientation string
+        self.pressure = "None"
 
         self.head_orientation = None
         if detection and isinstance(detection, Detection):
@@ -145,6 +146,13 @@ class Player:
         right_foot_distance = np.linalg.norm(ball.center - self.right_foot)
 
         return min(left_foot_distance, right_foot_distance)
+
+    def distance_to_player(self, opponent) -> float:
+        left_foot_distance = np.linalg.norm(np.array(opponent.left_foot) - np.array(self.left_foot))
+        right_foot_distance = np.linalg.norm(np.array(opponent.right_foot) - np.array(self.right_foot))
+
+        return min(left_foot_distance, right_foot_distance)
+
 
     def closest_foot_to_ball(self, ball: Ball) -> np.ndarray:
         """
@@ -252,8 +260,8 @@ class Player:
 
         return Draw.draw_pointer(detection=self.detection, img=frame, color=color)
 
-    def __str__(self):
-        return f"Player: {self.feet}, team: {self.team}"
+    # def __str__(self):
+    #     return f"Player: {self.feet}, team: {self.team}"
 
     def __eq__(self, other: "Player") -> bool:
         if isinstance(self, Player) == False or isinstance(other, Player) == False:
@@ -392,26 +400,56 @@ class Player:
                 label = " ".join(label_items)
 
                 # --- Draw Label ---
-                if label:
-                        # Simple text draw using PIL (adjust position/font as needed)
-                        draw = ImageDraw.Draw(frame)
-                        text_pos = (x1, y1 - 15 if y1 > 15 else y1 + 5) # Position above box
-                        try:
-                            # Basic font, find better way if needed
-                            #font = ImageFont.load_default() 
-                            font = ImageFont.truetype("arial.ttf", size=int(40))
-                            # Draw text (no background)
-                            draw.text(text_pos, label, fill=DEFAULT_TEXT_COLOR_PIL, font=font) 
-                        except Exception as font_e:
-                            print(f"Error loading/drawing font: {font_e}")
-                            # Fallback draw without font object
-                            draw.text(text_pos, label, fill=DEFAULT_TEXT_COLOR_PIL) 
+                # if label:
+                #         # Simple text draw using PIL (adjust position/font as needed)
+                #         draw = ImageDraw.Draw(frame)
+                #         text_pos = (x1, y1 - 15 if y1 > 15 else y1 + 5) # Position above box
+                #         try:
+                #             # Basic font, find better way if needed
+                #             #font = ImageFont.load_default() 
+                #             font = ImageFont.truetype("arial.ttf", size=int(40))
+                #             # Draw text (no background)
+                #             draw.text(text_pos, label, fill=DEFAULT_TEXT_COLOR_PIL, font=font) 
+                #         except Exception as font_e:
+                #             print(f"Error loading/drawing font: {font_e}")
+                #             # Fallback draw without font object
+                #             draw.text(text_pos, label, fill=DEFAULT_TEXT_COLOR_PIL) 
 
             # except Exception as e:
             #     print(f"Error drawing player ID {player.id}: {e}")
 
         return frame
     
+    @staticmethod
+    def draw_pressure(players: List["Player"], frame: PIL.Image.Image, target_id: int) -> PIL.Image.Image:
+        """
+        Draw the pressure on the frame
+
+        Parameters
+        ----------
+        players : List[Player]
+            List of players
+        frame : PIL.Image.Image
+            Frame to draw on
+
+        Returns
+        -------
+        PIL.Image.Image
+            Frame with pressure drawn
+        """
+        for player in players:
+            # if player.pressure == "None" or player.detection.data["id"] != target_id:
+            if player.detection == "None":
+                continue
+            else:
+                x1 = int(player.detection.points[0][0]); y1 = int(player.detection.points[0][1])
+                font = ImageFont.truetype("arial.ttf", size=int(20))
+                draw = ImageDraw.Draw(frame)
+                text_pos = (x1, y1 - 15 if y1 > 15 else y1 + 5) # Position above box
+                draw.text(text_pos, player.pressure, fill=DEFAULT_TEXT_COLOR_PIL, font=font) 
+
+        return frame
+
     @staticmethod
     def from_detections(
         detections: List[Detection], teams=List[Team]
