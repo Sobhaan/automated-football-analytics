@@ -61,7 +61,9 @@ class Player:
         self.smoothed_orientation = "Unknown" # Store smoothed orientation string
 
         self.head_orientation = None
-        
+        if detection and isinstance(detection, Detection):
+            if "team" in detection.data:
+                self.team = detection.data["team"]
         # Store center coordinates if detection provides them easily
         # This helps avoid recalculating frequently
         self._update_center()
@@ -69,61 +71,221 @@ class Player:
     def _update_center(self):
         """Helper to calculate center from detection data."""
         self.center = None
-        try:
-            if isinstance(self.detection, dict):
-                if 'xmin' in self.detection:
-                    self.center = (
-                        (self.detection['xmin'] + self.detection['xmax']) / 2,
-                        (self.detection['ymin'] + self.detection['ymax']) / 2
-                    )
-            # Add other ways to get center if detection format varies
-            # elif hasattr(self.detection, 'points'): ...
-        except Exception:
-            self.center = None # Ensure it's None if calculation fails
+        if isinstance(self.detection, dict):
+            if 'xmin' in self.detection:
+                self.center = (
+                    (self.detection['xmin'] + self.detection['xmax']) / 2,
+                    (self.detection['ymin'] + self.detection['ymax']) / 2
+                )
+        elif isinstance(self.detection, Detection):
+            self.center = ((self.detection.points[0][0] + self.detection.points[1][0]) / 2,
+                           (self.detection.points[0][1] + self.detection.points[1][1]) / 2)
 
-    # --- Keep necessary methods like distance calculation ---
-    def distance(self, obj: Any) -> float:
-        """Calculate distance to another object (Player or Ball)."""
-        # Needs implementation based on how center points are stored/calculated
-        if self.center is None or obj.center is None:
-            return float('inf')
-        return np.linalg.norm(np.array(self.center) - np.array(obj.center))
 
-    def distance_to_ball(self, ball: 'Ball') -> float:
-         # Example implementation
-         return self.distance(ball)
+    def get_left_foot(self, points: np.array):
+        x1, y1 = points[0]
+        x2, y2 = points[1]
+
+        return [x1, y2]
+
+    def get_right_foot(self, points: np.array):
+        return points[1]
+
+    @property
+    def left_foot(self):
+        points = self.detection.points
+        left_foot = self.get_left_foot(points)
+
+        return left_foot
+
+    @property
+    def right_foot(self):
+        points = self.detection.points
+        right_foot = self.get_right_foot(points)
+
+        return right_foot
+
+    @property
+    def left_foot_abs(self):
+        points = self.detection.absolute_points
+        left_foot_abs = self.get_left_foot(points)
+
+        return left_foot_abs
+
+    @property
+    def right_foot_abs(self):
+        points = self.detection.absolute_points
+        right_foot_abs = self.get_right_foot(points)
+
+        return right_foot_abs
+
+    @property
+    def feet(self) -> np.ndarray:
+        return np.array([self.left_foot, self.right_foot])
+
+    def distance_to_ball(self, ball: Ball) -> float:
+        """
+        Returns the distance between the player closest foot and the ball
+
+        Parameters
+        ----------
+        ball : Ball
+            Ball object
+
+        Returns
+        -------
+        float
+            Distance between the player closest foot and the ball
+        """
+
+        if self.detection is None or ball.center is None:
+            return None
+
+        left_foot_distance = np.linalg.norm(ball.center - self.left_foot)
+        right_foot_distance = np.linalg.norm(ball.center - self.right_foot)
+
+        return min(left_foot_distance, right_foot_distance)
+
+    def closest_foot_to_ball(self, ball: Ball) -> np.ndarray:
+        """
+
+        Returns the closest foot to the ball
+
+        Parameters
+        ----------
+        ball : Ball
+            Ball object
+
+        Returns
+        -------
+        np.ndarray
+            Closest foot to the ball (x, y)
+        """
+
+        if self.detection is None or ball.center is None:
+            return None
+
+        left_foot_distance = np.linalg.norm(ball.center - self.left_foot)
+        right_foot_distance = np.linalg.norm(ball.center - self.right_foot)
+
+        if left_foot_distance < right_foot_distance:
+            return self.left_foot
+
+        return self.right_foot
+
+    def closest_foot_to_ball_abs(self, ball: Ball) -> np.ndarray:
+        """
+
+        Returns the closest foot to the ball
+
+        Parameters
+        ----------
+        ball : Ball
+            Ball object
+
+        Returns
+        -------
+        np.ndarray
+            Closest foot to the ball (x, y)
+        """
+
+        if self.detection is None or ball.center_abs is None:
+            return None
+
+        left_foot_distance = np.linalg.norm(ball.center_abs - self.left_foot_abs)
+        right_foot_distance = np.linalg.norm(ball.center_abs - self.right_foot_abs)
+
+        if left_foot_distance < right_foot_distance:
+            return self.left_foot_abs
+
+        return self.right_foot_abs
+
+    def draw(
+        self, frame: PIL.Image.Image, confidence: bool = False, id: bool = False
+    ) -> PIL.Image.Image:
+        """
+        Draw the player on the frame
+
+        Parameters
+        ----------
+        frame : PIL.Image.Image
+            Frame to draw on
+        confidence : bool, optional
+            Whether to draw confidence text in bounding box, by default False
+        id : bool, optional
+            Whether to draw id text in bounding box, by default False
+
+        Returns
+        -------
+        PIL.Image.Image
+            Frame with player drawn
+        """
+        if self.detection is None:
+            return frame
+
+        if self.team is not None:
+            self.detection.data["color"] = self.team.color
+
+        return Draw.draw_detection(self.detection, frame, confidence=confidence, id=id)
+
+    def draw_pointer(self, frame: np.ndarray) -> np.ndarray:
+        """
+        Draw a pointer above the player
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Frame to draw on
+
+        Returns
+        -------
+        np.ndarray
+            Frame with pointer drawn
+        """
+        if self.detection is None:
+            return frame
+
+        color = None
+
+        if self.team:
+            color = self.team.color
+
+        return Draw.draw_pointer(detection=self.detection, img=frame, color=color)
+
+    def __str__(self):
+        return f"Player: {self.feet}, team: {self.team}"
+
+    def __eq__(self, other: "Player") -> bool:
+        if isinstance(self, Player) == False or isinstance(other, Player) == False:
+            return False
+
+        self_id = self.detection.data["id"]
+        other_id = other.detection.data["id"]
+
+        return self_id == other_id
          
-    def closest_foot_to_ball_abs(self, ball: 'Ball') -> Optional[np.ndarray]:
-         """Estimate absolute coords of foot closest to ball using keypoints."""
-         if self.keypoints is None or ball is None or ball.center is None:
-             return None
-         try:
-             # Keypoint indices for ankles in YOLOv8-Pose
-             l_ankle_idx, r_ankle_idx = 15, 16 
-             if self.keypoints.shape[0] <= max(l_ankle_idx, r_ankle_idx): return None
+    @staticmethod
+    def have_same_id(player1: "Player", player2: "Player") -> bool:
+        """
+        Check if player1 and player2 have the same ids
 
-             l_ankle = self.keypoints[l_ankle_idx, :2] # Absolute xy
-             r_ankle = self.keypoints[r_ankle_idx, :2] # Absolute xy
-             
-             # Check if keypoints are valid (e.g., > 0)
-             l_valid = np.all(l_ankle > 0)
-             r_valid = np.all(r_ankle > 0)
+        Parameters
+        ----------
+        player1 : Player
+            One player
+        player2 : Player
+            Another player
 
-             ball_center_np = np.array(ball.center)
-
-             if l_valid and r_valid:
-                 # Choose ankle closer to ball center
-                 dist_l = np.linalg.norm(l_ankle - ball_center_np)
-                 dist_r = np.linalg.norm(r_ankle - ball_center_np)
-                 return l_ankle if dist_l <= dist_r else r_ankle
-             elif l_valid:
-                 return l_ankle
-             elif r_valid:
-                 return r_ankle
-             else: # Neither ankle is valid
-                 return None
-         except Exception:
-             return None # Fallback
+        Returns
+        -------
+        bool
+            True if they have the same id
+        """
+        if not player1 or not player2:
+            return False
+        if "id" not in player1.detection.data or "id" not in player2.detection.data:
+            return False
+        return player1.detection.data["id"] == player2.detection.data["id"]
 
     # --- Static method to draw players ---
     @staticmethod
@@ -133,7 +295,6 @@ class Player:
         id: bool = False,
         draw_orientation: bool = False, 
         draw_head_orientation: bool = False,
-        team_colors: List[tuple] = None, # Optional: List of team colors
         target_player_id: Optional[int] = None # <-- Add target ID argument
     ) -> PIL.Image.Image:
         
@@ -158,16 +319,15 @@ class Player:
             if x1 > -1 and x1 < x2 and y1 < y2:
                 # --- Determine Color ---
                 # Use team color if team exists, otherwise default PIL color
-                print(f"Player {player.id} team: {player.team}")
                 if player.team == "Team 1":
-                    draw_color = team_colors[0]
+                    draw_color = (0,0,0)
                 elif player.team == "Team 2":
-                    draw_color = team_colors[1]
+                    draw_color = (255,255,255) 
                 else:
                     draw_color = DEFAULT_PLAYER_COLOR_PIL # Default color if no team or unknown team
                 
                 # --- Draw Rectangle ---
-                frame = Draw.rectangle(frame, (x1, y1), (x2, y2), draw_color, 2)
+                frame = Draw.rectangle(frame, (x1, y1), (x2, y2), draw_color, 3)
 
                 # --- Prepare Label ---
                 label_items = []
@@ -275,30 +435,17 @@ class Player:
             List of Player objects
         """
         players = []
-
+        
         for detection in detections:
             if detection is None:
                 continue
-
             if "classification" in detection.data:
                 team_name = detection.data["classification"]
                 team = Team.from_name(teams=teams, name=team_name)
                 detection.data["team"] = team
 
-            player = Player(detection=detection, id=True)
+            player = Player(detection=detection, id=True, team=team)
 
             players.append(player)
 
         return players
-
-# You might need to define the Ball class structure if methods like closest_foot_to_ball_abs use it
-# class Ball: # Dummy Ball class for type hints if not imported
-#      center: Optional[tuple] = None
-#      detection: Any = None
-#      # Add other necessary attributes/methods
-
-# # You might need to define the Team class structure if Player methods use it
-# class Team: # Dummy Team class for type hints
-#     name: str = "Unknown"
-#     color_rgb: tuple = (255, 255, 255) # Example attribute needed by drawing
-#     # Add other necessary attributes/methods

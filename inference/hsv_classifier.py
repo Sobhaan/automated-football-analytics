@@ -272,11 +272,16 @@ class HSVClassifier(BaseClassifier):
         """
         height, width, _ = img.shape
 
-        y_start = int(height * 0.15)
-        y_end = int(height * 0.50)
-        x_start = int(width * 0.15)
-        x_end = int(width * 0.85)
-
+        y_start = int(height * 0.3)
+        y_end = int(height * 0.5)
+        x_start = int(width * 0.4)
+        x_end = int(width * 0.6)
+        # plt.figure(figsize=(4,4))
+        # # convert BGR → RGB for display
+        # plt.imshow(cv2.cvtColor(img[y_start:y_end, x_start:x_end], cv2.COLOR_BGR2RGB))
+        # plt.axis('off')
+        # plt.show()
+    
         return img[y_start:y_end, x_start:x_end]
 
     def add_median_blur(self, img: np.ndarray) -> np.ndarray:

@@ -323,6 +323,7 @@ class PassEvent:
 
         # Check if the player we've been tracking just confirmed possession
         if self.current_closest_player and self.player_with_ball_counter == self.player_with_ball_threshold:
+        #if self.current_closest_player:
             
             # This player just confirmed possession (the potential receiver)
             receiver = self.current_closest_player
