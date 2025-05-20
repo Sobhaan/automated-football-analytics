@@ -59,12 +59,14 @@ class Player:
         self.keypoints = None # Store absolute keypoints [K, 3] numpy array or None
         self.orientation = "Unknown" # Store raw orientation string
         self.smoothed_orientation = "Unknown" # Store smoothed orientation string
+        self.body_orientation = "Unknown" # Store body orientation string
         self.pressure = "None"
+        self.scanning = None
 
         self.head_orientation = None
-        if detection and isinstance(detection, Detection):
-            if "team" in detection.data:
-                self.team = detection.data["team"]
+        # if detection and isinstance(detection, Detection):
+        #     if "team" in detection.data:
+        #         self.team = detection.data["classification"] 
         # Store center coordinates if detection provides them easily
         # This helps avoid recalculating frequently
         self._update_center()
@@ -301,11 +303,9 @@ class Player:
         players: List["Player"],
         frame: PIL.Image.Image,
         id: bool = False,
-        draw_orientation: bool = False, 
-        draw_head_orientation: bool = False,
         target_player_id: Optional[int] = None # <-- Add target ID argument
     ) -> PIL.Image.Image:
-        
+
         for player in players:
             if player.detection is None: 
                 print(f"Player {player.id} has no detection data.")
@@ -317,9 +317,12 @@ class Player:
             x1, y1, x2, y2 = -1, -1, -1, -1
             detection_data = player.detection # This is likely a dict now
                     # Ensure coords are valid numbers before casting
-            if all(pd.notna(detection_data[k]) for k in ['xmin','ymin','xmax','ymax']):
-                x1 = int(detection_data['xmin']); y1 = int(detection_data['ymin'])
-                x2 = int(detection_data['xmax']); y2 = int(detection_data['ymax'])
+            # if all(pd.notna(detection_data[k]) for k in ['xmin','ymin','xmax','ymax']):
+            #     x1 = int(detection_data['xmin']); y1 = int(detection_data['ymin'])
+            #     x2 = int(detection_data['xmax']); y2 = int(detection_data['ymax'])
+
+            x1 = int(detection_data.points[0][0]); y1 = int(detection_data.points[0][1])
+            x2 = int(detection_data.points[1][0]); y2 = int(detection_data.points[1][1])
             # Add other extraction methods if format varies (e.g., from Norfair object)
             # elif hasattr(player.detection, 'points'): ... 
             
@@ -327,99 +330,41 @@ class Player:
             if x1 > -1 and x1 < x2 and y1 < y2:
                 # --- Determine Color ---
                 # Use team color if team exists, otherwise default PIL color
-                if player.team == "Team 1":
+                if str(player.team) == "Team 1":
                     draw_color = (0,0,0)
-                elif player.team == "Team 2":
+                elif str(player.team) == "Team 2":
                     draw_color = (255,255,255) 
                 else:
                     draw_color = DEFAULT_PLAYER_COLOR_PIL # Default color if no team or unknown team
-                
                 # --- Draw Rectangle ---
                 frame = Draw.rectangle(frame, (x1, y1), (x2, y2), draw_color, 3)
 
                 # --- Prepare Label ---
                 label_items = []
-                if id: label_items.append(f"ID:{player.id}")
-                
-                # --- Draw orientation ONLY for the target player ---
-                if draw_orientation and player.id == target_player_id and player.smoothed_orientation != "Unknown":
-                    label_items.append(player.smoothed_orientation) 
-
-                if draw_head_orientation and player.id == target_player_id and player.head_orientation is not None:
-                    origin=(x1+100, y1-100)
-                    size=250
-                    origin_int = tuple(map(int, origin))
-                    yaw, pitch, roll = player.head_orientation[0]
-                    pitch_rad = math.radians(pitch)
-                    yaw_rad = math.radians(yaw)
-                    roll_rad = math.radians(roll)
-
-                    # Rotation matrices
-                    R_y = np.array([[math.cos(yaw_rad),  0, math.sin(yaw_rad)],
-                                    [0,                  1, 0               ],
-                                    [-math.sin(yaw_rad), 0, math.cos(yaw_rad)]])
-                    R_x = np.array([[1, 0,                  0                ],
-                                    [0, math.cos(pitch_rad), -math.sin(pitch_rad)],
-                                    [0, math.sin(pitch_rad), math.cos(pitch_rad)]])
-                    R_z = np.array([[math.cos(roll_rad), -math.sin(roll_rad), 0],
-                                    [math.sin(roll_rad), math.cos(roll_rad),  0],
-                                    [0,                  0,                  1]])
-
-                    # Combined rotation matrix (YXZ order assumed from original code)
-                    R = R_y @ R_x @ R_z
-
-                    # Define 3D Axis endpoints
-                    axis_points_3d = np.float32([
-                        [size, 0, 0],    # X-axis end
-                        [0, -size, 0],   # Y-axis end (negative Y for "up")
-                        [0, 0, size]     # Z-axis end
-                    ])
-
-                    # Rotate the 3D axes
-                    rotated_axes_3d = R @ axis_points_3d.T
-                    rotated_axes_3d = rotated_axes_3d.T
-
-                    # Project onto 2D image plane (simple orthographic)
-                    axis_points_2d = (rotated_axes_3d[:, :2] + origin_int).astype(int)
-
-                    # Draw the axes on the current frame
-                    # Make a copy if you don't want to modify the original input frames list
-                    draw_frame = ImageDraw.Draw(frame)
-                    start_pt = tuple(map(int, origin))
-                    end_pt_x = tuple(axis_points_2d[0])
-                    end_pt_y = tuple(axis_points_2d[1])
-                    end_pt_z = tuple(axis_points_2d[2])
-
-                    text_pos = (x1, y1 - 25 if y1 > 15 else y1 + 15)
-                    draw_frame.line([start_pt, end_pt_x], fill=(255, 0, 0), width=20)  # X Red (RGB)
-                    draw_frame.line([start_pt, end_pt_y], fill=(0, 255, 0), width=20)  # Y Green (RGB)
-                    draw_frame.line([start_pt, end_pt_z], fill=(0, 0, 255), width=2)  # Z Blue (RGB)
-
-                    
+                if id: label_items.append(f"ID:{player.detection.data['id']}")        
                     
                 label = " ".join(label_items)
-
                 # --- Draw Label ---
-                # if label:
-                #         # Simple text draw using PIL (adjust position/font as needed)
-                #         draw = ImageDraw.Draw(frame)
-                #         text_pos = (x1, y1 - 15 if y1 > 15 else y1 + 5) # Position above box
-                #         try:
-                #             # Basic font, find better way if needed
-                #             #font = ImageFont.load_default() 
-                #             font = ImageFont.truetype("arial.ttf", size=int(40))
-                #             # Draw text (no background)
-                #             draw.text(text_pos, label, fill=DEFAULT_TEXT_COLOR_PIL, font=font) 
-                #         except Exception as font_e:
-                #             print(f"Error loading/drawing font: {font_e}")
-                #             # Fallback draw without font object
-                #             draw.text(text_pos, label, fill=DEFAULT_TEXT_COLOR_PIL) 
+                if label:
+                        # Simple text draw using PIL (adjust position/font as needed)
+                        draw = ImageDraw.Draw(frame)
+                        text_pos = (x1, y2 + 15 if y2 > 15 else y2 + 5) # Position below box
+                        try:
+                            # Basic font, find better way if needed
+                            #font = ImageFont.load_default() 
+                            font = ImageFont.truetype("arial.ttf", size=int(20))
+                            # Draw text (no background)
+                            draw.text(text_pos, label, fill=DEFAULT_TEXT_COLOR_PIL, font=font) 
+                        except Exception as font_e:
+                            print(f"Error loading/drawing font: {font_e}")
+                            # Fallback draw without font object
+                            draw.text(text_pos, label, fill=DEFAULT_TEXT_COLOR_PIL) 
 
-            # except Exception as e:
-            #     print(f"Error drawing player ID {player.id}: {e}")
 
         return frame
     
+
+
     @staticmethod
     def draw_pressure(players: List["Player"], frame: PIL.Image.Image, target_id: int) -> PIL.Image.Image:
         """
@@ -438,15 +383,122 @@ class Player:
             Frame with pressure drawn
         """
         for player in players:
-            # if player.pressure == "None" or player.detection.data["id"] != target_id:
-            if player.detection == "None":
+            if player.pressure == "None" or player.detection.data["id"] != target_id:
+            #if player.detection == "None":
                 continue
             else:
                 x1 = int(player.detection.points[0][0]); y1 = int(player.detection.points[0][1])
                 font = ImageFont.truetype("arial.ttf", size=int(20))
                 draw = ImageDraw.Draw(frame)
-                text_pos = (x1, y1 - 15 if y1 > 15 else y1 + 5) # Position above box
+                text_pos = (x1, y1 - 38 if y1 > 38 else y1 + 5) # Position above box
                 draw.text(text_pos, player.pressure, fill=DEFAULT_TEXT_COLOR_PIL, font=font) 
+
+        return frame
+    
+    @staticmethod
+    def draw_scanning(players: List["Player"], frame: PIL.Image.Image, target_id: int) -> PIL.Image.Image:
+        """
+        Draw the pressure on the frame
+
+        Parameters
+        ----------
+        players : List[Player]
+            List of players
+        frame : PIL.Image.Image
+            Frame to draw on
+
+        Returns
+        -------
+        PIL.Image.Image
+            Frame with pressure drawn
+        """
+        for player in players:
+            if player.scanning is None or player.detection.data["id"] != target_id:
+            #if player.detection == "None":
+                continue
+            else:
+                print(f"Drawing head orientation for player {player.id}")
+                x1 = int(player.detection.points[0][0]); y1 = int(player.detection.points[0][1])
+                x2 = int(player.detection.points[1][0]); y2 = int(player.detection.points[1][1])
+                origin=(x1+100, y1-100)
+                size=250
+                origin_int = tuple(map(int, origin))
+                print(player.scanning)
+                yaw, pitch, roll = player.scanning[0]
+                pitch_rad = math.radians(pitch)
+                yaw_rad = math.radians(yaw)
+                roll_rad = math.radians(roll)
+
+                # Rotation matrices
+                R_y = np.array([[math.cos(yaw_rad),  0, math.sin(yaw_rad)],
+                                [0,                  1, 0               ],
+                                [-math.sin(yaw_rad), 0, math.cos(yaw_rad)]])
+                R_x = np.array([[1, 0,                  0                ],
+                                [0, math.cos(pitch_rad), -math.sin(pitch_rad)],
+                                [0, math.sin(pitch_rad), math.cos(pitch_rad)]])
+                R_z = np.array([[math.cos(roll_rad), -math.sin(roll_rad), 0],
+                                [math.sin(roll_rad), math.cos(roll_rad),  0],
+                                [0,                  0,                  1]])
+
+                # Combined rotation matrix (YXZ order assumed from original code)
+                R = R_y @ R_x @ R_z
+
+                # Define 3D Axis endpoints
+                axis_points_3d = np.float32([
+                    [size, 0, 0],    # X-axis end
+                    [0, -size, 0],   # Y-axis end (negative Y for "up")
+                    [0, 0, size]     # Z-axis end
+                ])
+
+                # Rotate the 3D axes
+                rotated_axes_3d = R @ axis_points_3d.T
+                rotated_axes_3d = rotated_axes_3d.T
+
+                # Project onto 2D image plane (simple orthographic)
+                axis_points_2d = (rotated_axes_3d[:, :2] + origin_int).astype(int)
+
+                # Draw the axes on the current frame
+                # Make a copy if you don't want to modify the original input frames list
+                draw = ImageDraw.Draw(frame)
+                start_pt = tuple(map(int, origin))
+                end_pt_x = tuple(axis_points_2d[0])
+                end_pt_y = tuple(axis_points_2d[1])
+                end_pt_z = tuple(axis_points_2d[2])
+
+                text_pos = (x1, y1 - 25 if y1 > 15 else y1 + 15)
+                draw.line([start_pt, end_pt_x], fill=(255, 0, 0), width=20)  # X Red (RGB)
+                draw.line([start_pt, end_pt_y], fill=(0, 255, 0), width=20)  # Y Green (RGB)
+                draw.line([start_pt, end_pt_z], fill=(0, 0, 255), width=2)  # Z Blue (RGB)
+
+        return frame
+
+    @staticmethod
+    def draw_body_orientation(players: List["Player"], frame: PIL.Image.Image, target_id: int) -> PIL.Image.Image:
+        """
+        Draw the pressure on the frame
+
+        Parameters
+        ----------
+        players : List[Player]
+            List of players
+        frame : PIL.Image.Image
+            Frame to draw on
+
+        Returns
+        -------
+        PIL.Image.Image
+            Frame with pressure drawn
+        """
+        for player in players:
+            if player.body_orientation == "Unknown" or player.detection.data["id"] != target_id:
+            #if player.body_orientation == "Unknown":
+                continue
+            else:
+                x1 = int(player.detection.points[0][0]); y1 = int(player.detection.points[0][1])
+                font = ImageFont.truetype("arial.ttf", size=int(20))
+                draw = ImageDraw.Draw(frame)
+                text_pos = (x1, y1 - 20 if y1 > 20 else y1 + 5) # Position above box
+                draw.text(text_pos, player.body_orientation, fill=DEFAULT_TEXT_COLOR_PIL, font=font) 
 
         return frame
 

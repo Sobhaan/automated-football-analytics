@@ -4,7 +4,7 @@ from typing import List
 import norfair
 import numpy as np
 import PIL
-
+import cv2
 
 class Draw:
     @staticmethod
@@ -888,3 +888,45 @@ class AbsolutePath:
         img = self.draw_path_arrows(img=img, path=path)
 
         return img
+
+
+
+def draw_arrow(
+            frame_pil: PIL.Image.Image,
+            arrow_origin = np.array([50, 50]), # Example origin
+            arrow_length = 40, # Example length
+            arrow_color = (0, 0, 255), # Example color (BGR)
+            arrow_thickness = 10, # Example thickness
+            fwd_vec = np.array((-1, 0.4), dtype=float)):
+        """
+        Draw a rounded rectangle on the image
+
+        Parameters
+        ----------
+        img : PIL.Image.Image
+            Image
+        rectangle : tuple
+            Rectangle to draw ( (xmin, ymin), (xmax, ymax) )
+        color : tuple
+            Color of the rectangle (BGR)
+        radius : int, optional
+            Radius of the corners, by default 15
+
+        Returns
+        -------
+        PIL.Image.Image
+            Image with the rounded rectangle drawn
+        """
+
+        norm = np.linalg.norm(fwd_vec)
+        if norm > 1e-6:
+            fwd_vec_normalized = fwd_vec / norm
+        else:
+            fwd_vec_normalized = np.array([0, -1.0]) # Default up
+
+        arrow_end = arrow_origin + fwd_vec_normalized * arrow_length
+        arrow_origin_int = tuple(arrow_origin.astype(int))
+        arrow_end_int = tuple(arrow_end.astype(int))
+        frame_pil = cv2.arrowedLine(np.array(frame_pil), arrow_origin_int, arrow_end_int, 
+                        arrow_color, arrow_thickness, tipLength=0.3)
+        return frame_pil

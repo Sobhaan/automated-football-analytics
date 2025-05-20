@@ -10,7 +10,11 @@ from soccer.pass_event import Pass, PassEvent
 from soccer.player import Player
 from soccer.team import Team
 import time
-
+import pandas as pd
+from body_orientation import BodyOrientationEstimator # Ensure this file exists
+from head_orientation import estimate_head_pose_angles, keypoints_pose_solo
+import math 
+from itertools import islice
 
 class Match:
     def __init__(self, home: Team, away: Team, fps: int = 30):
@@ -35,6 +39,7 @@ class Match:
         self.possession_counter = 0
         self.closest_player = None
         self.ball = None
+        self.shoulder_vec = [0,0]
         # Amount of consecutive frames new team has to have the ball in order to change possession
         self.possesion_counter_threshold = 20
         # Distance in pixels from player to ball in order to consider a player has the ball
@@ -43,7 +48,8 @@ class Match:
         # Pass detection
         self.pass_event = PassEvent()
 
-    def update(self, players: List[Player], ball: Ball, frame_idx: int):
+    def update(self, players: List[Player], ball: Ball, frame_idx: int, body_orientation: bool, scanning: bool, pressure: bool, frame_np: np.ndarray = None, 
+               target_id: int = 0, estimator: BodyOrientationEstimator = None):
         """
 
         Update match possession and closest player
@@ -55,9 +61,18 @@ class Match:
         ball : Ball
             Ball
         """
+        if pressure:
+            self.update_pressure(
+                players=players)
+        
+        if body_orientation:
+            self.update_body_orientation(
+                players=players, frame_np=frame_np, target=target_id, estimator=estimator)
 
-        self.update_pressure(
-            players=players, frame_idx=frame_idx)
+        if scanning:
+            self.update_scanning(
+                players=players, frame_np=frame_np, target=target_id
+            )
         
         self.update_possession()
             
@@ -98,9 +113,49 @@ class Match:
         # Update pressure recursively
         # reciever_pass = self.pass_event.receiver_id()
         # init_frame_pass = self.pass_event.initiation_frame()
+
+    def update_body_orientation(self, players: List[Player], target: int = 0, frame_np: np.ndarray = None, estimator: BodyOrientationEstimator = None):
+        """
+        Update body orientation of players
+
+        Parameters
+        ----------
+        players : List[Player]
+            List of players
+        """
+        
+        for player in players:
+            if player.detection.data["id"] == target:
+                # try:
+                    print("Player ID: ", player.detection.data["id"])
+                    target_orientation_data = estimator.process_target_player_solo(frame_np, player, self.shoulder_vec)
+                    print(dict(islice(target_orientation_data.items(), 2)))
+                    player.body_orientation = target_orientation_data["orientation_smooth"]
+                    self.shoulder_vec = target_orientation_data["shoulder_vector"]
+
+                # except Exception as e:
+                #     print(f"Error processing body orientation: {e}")
+                #     player.body_orientation = "Unknown"
+
+    def update_scanning(self, players: List[Player], target: int = 0, frame_np: np.ndarray = None):
+        """
+        Update scanning of players
+
+        Parameters
+        ----------
+        players : List[Player]
+            List of players
+        """
+        
+        for player in players:
+            if player.detection.data["id"] == target:
+                keypoints = keypoints_pose_solo(frame_np, player)
+                angles = estimate_head_pose_angles(keypoints, conf_threshold=0.1, conf_yaw_scale=30.0)
+                if not np.isnan(angles[0][0]):
+                    player.scanning = angles             
         
         
-    def update_pressure(self, players: List[Player], frame_idx: int):
+    def update_pressure(self, players: List[Player], target: int = 0):
         """
         Update pressure of players
 
@@ -109,23 +164,20 @@ class Match:
         players : List[Player]
             List of players
         """
-
-        # for players in active_players.values():
-        #     print(players)
-        # asdadsdsadsasdsdsadsaddsasad
         for player in players:
-            player.pressure = "No Pressure"
-            for opponent in players:
-                if player.team != opponent.team:
-                    distance = player.distance_to_player(opponent)
-                    if distance < 50 :
-                        player.pressure = "High Pressure"
-                    elif distance < 150 and player.pressure != "High Pressure":
-                        player.pressure = "Medium Pressure"
-                    elif distance < 300 and player.pressure != "Medium Pressure" and player.pressure != "High Pressure":
-                        player.pressure = "Low Pressure"
-                    elif player.pressure != "Low Pressure" and player.pressure != "Medium Pressure" and player.pressure != "High Pressure":
-                        player.pressure = "No Pressure"                    
+            #if player.detection.data["id"] == target:
+                player.pressure = "No Pressure"
+                for opponent in players:
+                    if player.team != opponent.team:
+                        distance = player.distance_to_player(opponent)
+                        if distance < 50 :
+                            player.pressure = "High Pressure"
+                        elif distance < 150 and player.pressure != "High Pressure":
+                            player.pressure = "Medium Pressure"
+                        elif distance < 300 and player.pressure != "Medium Pressure" and player.pressure != "High Pressure":
+                            player.pressure = "Low Pressure"
+                        elif player.pressure != "Low Pressure" and player.pressure != "Medium Pressure" and player.pressure != "High Pressure":
+                            player.pressure = "No Pressure"                    
 
     def change_team(self, team: Team):
         """

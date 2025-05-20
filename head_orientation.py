@@ -214,3 +214,66 @@ def keypoints_pose(image, player_detections_df, target_id, model='yolov8x-pose-p
 
             # cv2.imwrite('output/orientationorg.jpg', output_image)
         return keypoint_list
+    
+def keypoints_pose_solo(image, player, model='yolov8x-pose-p6.pt', visualisation=False):
+
+    x1 = int(player.detection.points[0][0]); y1 = int(player.detection.points[0][1])
+    x2 = int(player.detection.points[1][0]); y2 = int(player.detection.points[1][1])
+    crop_padding = 10
+    frame_h, frame_w = image.shape[:2]
+    pad_x1 = max(0, x1 - crop_padding)
+    pad_y1 = max(0, y1 - crop_padding)
+    pad_x2 = min(frame_w, x2 + crop_padding)
+    pad_y2 = min(frame_h, y2 + crop_padding)
+
+    if pad_x1 < pad_x2 and pad_y1 < pad_y2:
+        image = image[pad_y1:pad_y2, pad_x1:pad_x2]
+        model = YOLO(model)
+        # images, res = crop_focused_player(target_player_id=target_player_id, video_path=video_path)
+        keypoint_list = []
+        results = model(image)
+        # Create visualization without text
+        output_image = image.copy()
+        
+        keypoints = results[0].keypoints.data.cpu().numpy()
+        
+        if len(list(keypoints)) == 1:
+            print("No keypoints")
+            results = model(image, conf=0.01)
+            keypoints = results[0].keypoints.data.cpu().numpy()
+        if len(list(keypoints)) == 1:
+            print("Still no keypoints")
+            results = model(image, conf=0.003)
+            keypoints = results[0].keypoints.data.cpu().numpy()
+        keypoint_list.append(keypoints)
+        # Keypoint names
+        keypoint_names = [
+            "nose", "l_eye", "r_eye", "l_ear", "r_ear", 
+            "l_shoulder", "r_shoulder", "l_elbow", "r_elbow", "l_wrist", "r_wrist",
+            "l_hip", "r_hip", "l_knee", "r_knee", "l_ankle", "r_ankle"
+        ]
+
+        # Draw keypoints with small labels
+        if visualisation:
+            for person in keypoints:
+                for i, kp in enumerate(person):
+                    x, y, conf = kp
+                    print("number: ", i, "coords:" ,x, y, "confidence: ", conf, "label name: ",keypoint_names[i])
+                    if conf > 0.5:  # Only draw high-confidence keypoints
+                        # Draw keypoint
+                        cv2.circle(output_image, (int(x), int(y)), 1, (0, 255, 0), -1)
+                        # Add small label
+                        label = keypoint_names[i]
+                        cv2.putText(output_image, str(i), (int(x)+1, int(y)+1), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.18, (0, 0, 255), 1)
+                        
+            window_name = "Pose Keypoints"
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(window_name, 640, 640)
+            cv2.imshow(window_name, output_image)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
+            cv2.imwrite('4kbbox.png', output_image)
+
+            # cv2.imwrite('output/orientationorg.jpg', output_image)
+        return keypoint_list

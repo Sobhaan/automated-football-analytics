@@ -25,7 +25,7 @@ class YoloV8(BaseDetector):
         self.conf = conf
 
         if model_path:
-            self.model = YOLO(model_path)
+            self.model = YOLO(model_path, task="detect")
         else:
             self.model = YOLO(
                 "yolov8x"

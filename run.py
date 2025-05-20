@@ -32,7 +32,7 @@ from soccer import Player, Ball # Player class needs modification
 # Team/Match/PassEvent not needed if only drawing players/ball + orientation
 from soccer import Match, Team 
 from soccer.pass_event import Pass 
-from soccer.draw import AbsolutePath, Draw # Ensure Draw class/functions exist
+from soccer.draw import AbsolutePath, Draw, draw_arrow # Ensure Draw class/functions exist
 # from inference import HSVClassifier, InertiaClassifier # Keep these
 from inference.hsv_classifier import HSVClassifier # Ensure this file exists
 from inference.inertia_classifier import InertiaClassifier # Ensure this file exists
@@ -42,6 +42,9 @@ import random
 from body_orientation import BodyOrientationEstimator # Ensure this file exists
 from head_orientation import estimate_head_pose_angles, keypoints_pose
 from auto_hsv_generator import generate_auto_hsv_filters
+import time
+from output import generate_output_df, update_lists
+from forward_vector import forward_vector
 
 # --- Argument Parsing ---
 parser = argparse.ArgumentParser(description="Soccer Video Analytics with Target Orientation")
@@ -52,22 +55,22 @@ parser.add_argument(
     help="Path to the input video",
 )
 parser.add_argument(
-    "--ball_model", default="../FootieStats/weights/ball.pt", type=str, help="Path to the ball detection model" # ADJUST PATH AS NEEDED
+    "--ball_model", default="../FootieStats/weights/ball.engine", type=str, help="Path to the ball detection model" # ADJUST PATH AS NEEDED
 )
 parser.add_argument(
-    "--player_model", default="../FootieStats/weights/players.pt", type=str, help="Path to the player detection model" # ADJUST PATH AS NEEDED
+    "--player_model", default="../FootieStats/weights/players.engine", type=str, help="Path to the player detection model" # ADJUST PATH AS NEEDED
 )
 parser.add_argument(
     "--pose_model", default='yolov8x-pose-p6.pt', type=str, help="Path to the YOLOv8 Pose model"
 )
 parser.add_argument(
-    "--body_orientation", default=False, type=str, help="Enable body orientation estimation" 
+    "--body_orientation", default=True, type=str, help="Enable body orientation estimation" 
 )
 parser.add_argument(
     "--scanning", default=False, type=str, help="Enable scanning for target player"
 )
 parser.add_argument(
-    "--target_id", type=int, default=21, help="Track ID of player for orientation analysis" # Require target ID
+    "--target_id", type=int, default=3, help="Track ID of player for orientation analysis" # Require target ID
 )
 parser.add_argument(
     "--all_players", default=True, type=str, help="Track all players or only target player"
@@ -78,10 +81,13 @@ parser.add_argument(
 parser.add_argument(
     "--pressure", default=True, type=str, help="Enable pressure detection"
 )
+parser.add_argument(
+    "--visualize", default=True, type=str, help="Enable visualization of players and ball"
+)
 
 parser.add_argument( 
     "--output", 
-    default="output/pressurna2222s.mp4", # Default output name
+    default="output/alnassrend.mp4", # Default output name
     type=str, 
     help="Path for output video file"
 )
@@ -90,6 +96,9 @@ args = parser.parse_args()
 body_orientation = ast.literal_eval(str(args.body_orientation))
 allplayers = ast.literal_eval(str(args.all_players))
 scanning = ast.literal_eval(str(args.scanning))
+pressure = ast.literal_eval(str(args.pressure))
+automatic_teams = ast.literal_eval(str(args.automatic_teams))
+visualize = ast.literal_eval(str(args.visualize))
 
 # --- Video Setup with Norfair Writing ---
 output_dir = os.path.dirname(args.output)
@@ -157,10 +166,12 @@ match = Match(home=team1, away=team2, fps=fps)
 # match.team_possession = team2
 # --- Orientation Estimator Setup ---
 # Add other tunable parameters as arguments if desired  
-smooth_window = 7
-pose_conf = 0.4
-crop_pad = 15
-FORWARD_VECTOR = (-1, 0.4) # Adjust based camera angle
+smooth_window = 10
+pose_conf = 0.1
+crop_pad = 0
+FORWARD_VECTOR = forward_vector() # Adjust based camera angle
+#FORWARD_VECTOR = (-0.9978, -0.0665)
+print(f"FORWARD_VECTOR: {FORWARD_VECTOR}")
 estimator = BodyOrientationEstimator(
     target_id=args.target_id, 
     pose_model_path=args.pose_model, 
@@ -192,10 +203,23 @@ coord_transformations = None
 # path = AbsolutePath() # Uncomment if drawing ball path
 
 # --- Dictionary to hold active Player objects ---
-active_players: Dict[int, Player] = {} 
+active_players: Dict[int, Player] = {}
+old_passes = [] 
 passes_list = []
+target_pass_list = []
 
-# --- REMOVED Manual VideoWriter Setup ---
+# --- Value lists ---
+body_position_list = []
+pressure_list = []
+turnable_list = []
+number_of_scans_list = []
+
+# --- Final Target Values ---
+time_list = []
+target_bp = []
+target_pressure = []
+target_turnable = []
+target_number_of_scans = []
 
 # --- MAIN PROCESSING LOOP ---
 print("\nStarting video processing...")
@@ -204,7 +228,9 @@ try:
     for i, frame in enumerate(video):
         frame_np = frame # Norfair Video yields BGR NumPy array
         frame_count = i
-
+        print("\n")
+        print(f"Processing frame {i}...") # Debug print
+        # if i == 200: break
         # 1. Player and Ball Detection
         # Pass frame_np to detectors
         players_detections_raw = get_player_detections(player_detector, frame_np) 
@@ -229,72 +255,15 @@ try:
         ball_detections_tracked = Converter.TrackedObjects_to_Detections(ball_track_objects)
         # players_df = Converter.Detections_to_DataFrame(player_detections_tracked)
         
-        if args.automatic_teams:
+        if automatic_teams:
             player_detections = classifier.predict_from_detections(
                 detections=player_detections_tracked, # Pass the list of Norfair/Converter Detection objects
                 img=frame_np
             )
-            players_df = Converter.Detections_to_DataFrame(player_detections)
-        else:
-            players_df = Converter.Detections_to_DataFrame(player_detections_tracked)
         
-
-        # 4. Get Orientation for the Target Player
-        if body_orientation:
-            target_orientation_data = None 
-            if not players_df.empty:
-                target_orientation_data = estimator.process_target_player(frame_np, players_df) 
-        
-        if scanning:
-            if not players_df.empty:
-                keypoints = keypoints_pose(frame_np, players_df, args.target_id)
         count = 0
         current_frame_track_ids = set()
-
-        # 5. Update Active Player Objects Dictionary
-        if not players_df.empty and 'id' in players_df.columns:
-            for _, row in players_df.iterrows():
-                track_id = int(row['id'])
-                current_frame_track_ids.add(track_id)
-
-                player_data_for_obj = row.to_dict()
-                if args.automatic_teams: 
-                    team = player_detections[count].data["classification"] 
-                    count += 1
-                else:
-                    team = None
-                if track_id not in active_players and allplayers:
-                    # Ensure Player class handles team=None and dict for detection
-                    active_players[track_id] = Player(id=track_id, detection=player_data_for_obj, team=team) 
-                elif track_id in active_players and allplayers:
-                    active_players[track_id].detection = player_data_for_obj
-
-                # Update target player's orientation state
-                if track_id == args.target_id and body_orientation:
-                    if not allplayers and track_id not in active_players:
-                        active_players[track_id] = Player(id=track_id, detection=player_data_for_obj, team=team)
-                    elif track_id in active_players and not allplayers:
-                        active_players[track_id].detection = player_data_for_obj
-                    if target_orientation_data:
-                        active_players[track_id].keypoints = target_orientation_data['keypoints']
-                        active_players[track_id].orientation = target_orientation_data['orientation_raw']
-                        active_players[track_id].smoothed_orientation = target_orientation_data['orientation_smooth']
-                    else:
-                        # Ensure state is reset/maintained correctly if target detected but orientation fails
-                        active_players[track_id].keypoints = None
-                        active_players[track_id].orientation = "Unknown"
-                        active_players[track_id].smoothed_orientation = estimator._smooth_orientation("Unknown")
-                if track_id == args.target_id and scanning:
-                    if not allplayers and track_id not in active_players:
-                        active_players[track_id] = Player(id=track_id, detection=player_data_for_obj, team=team)
-                    elif track_id in active_players and not allplayers:
-                        active_players[track_id].detection = player_data_for_obj
-                    angles = estimate_head_pose_angles(keypoints, conf_threshold=0.1, conf_yaw_scale=30.0)
-                    if not np.isnan(angles[0][0]):
-                        active_players[track_id].head_orientation = angles
-                    print(f"Head orientation for player {track_id}: {active_players[track_id].head_orientation}, frame {frame_count}") # Debug print
         
-
         # 6. Remove Stale Player Objects, otherwise the bbox will be drawn even without player detection
         lost_track_ids = set(active_players.keys()) - current_frame_track_ids
         for track_id in lost_track_ids: 
@@ -305,73 +274,91 @@ try:
         ball = get_main_ball(ball_detections_tracked)
         
 
-        if args.automatic_teams:
+        if automatic_teams:
             players = Player.from_detections(detections=player_detections, teams=teams)
         else:
             players = Player.from_detections(detections=player_detections_tracked, teams=teams)
 
-        match.update(players, ball, i)
-        pass_list = match.passes
+        match.update(players, ball, i, body_orientation, scanning, pressure, frame_np, target_id=args.target_id, estimator=estimator)
+        body_position_list, pressure_list, turnable_list, number_of_scans_list = update_lists(players, args.target_id, body_position_list, pressure_list, turnable_list, number_of_scans_list)
         passes_list = match.passes
+        if len(passes_list) > len(old_passes):
+            for passs in passes_list:
+                if passs not in old_passes:
+                    print(f"Pass Detected! {passs.passer_id} -> {passs.receiver_id}. Initiated around frame {passs.initiation_frame}.")
+                    if args.target_id == passs.receiver_id:
+                        time_list.append(passs.initiation_frame * (1/fps))
+                        target_bp.append(body_position_list[passs.initiation_frame])
+                        target_pressure.append(pressure_list[passs.initiation_frame])
+                        target_turnable.append(turnable_list[passs.initiation_frame])
+                        target_number_of_scans.append(number_of_scans_list[passs.initiation_frame])
+                        target_pass_list.append(passs)
+        old_passes = passes_list
+        
+        
+        if visualize:
+            start_time = time.time()
+            # 8. Draw Visualizations
+            frame_final = frame_np # Default to original frame if drawing fails
+            # Convert frame BGR NumPy to RGB PIL Image if Draw utils require it
+            # If your Draw utils use OpenCV directly, skip this conversion
+            frame_pil = PIL.Image.fromarray(cv2.cvtColor(frame_np, cv2.COLOR_BGR2RGB))
 
-
-        # 8. Draw Visualizations
-        frame_final = frame_np # Default to original frame if drawing fails
-        # Convert frame BGR NumPy to RGB PIL Image if Draw utils require it
-        # If your Draw utils use OpenCV directly, skip this conversion
-        frame_pil = PIL.Image.fromarray(cv2.cvtColor(frame_np, cv2.COLOR_BGR2RGB))
-
-        # Draw all players - Player.draw_players needs updated implementation
-        frame_pil = Player.draw_players(
-            players=list(active_players.values()),
-            frame=frame_pil,
-            id=True,
-            draw_orientation=body_orientation, # Master switch
-            draw_head_orientation=scanning, # Draw head orientation if scanning
-            target_player_id=args.target_id, # Pass target ID
-        )
-
-        if args.pressure:
-            frame_pil = Player.draw_pressure(
+            # Draw all players - Player.draw_players needs updated implementation
+            frame_pil = Player.draw_players(
                 players=players,
                 frame=frame_pil,
-                target_id=args.target_id,
+                id=True,
+                target_player_id=args.target_id, # Pass target ID
             )
-        # Draw ball (optional)
-        if ball:
-            # Ensure ball.draw handles PIL Image and RGB color
-            frame_pil = ball.draw(frame_pil) # Example green ball (RGB)
 
-        # Draw arrow for orientation - adjust as needed
-        arrow_origin = np.array([50, 50]) 
-        arrow_length = 40
-        arrow_color = (0, 0, 255) # Red
-        arrow_thickness = 10
-        fwd_vec = np.array(FORWARD_VECTOR, dtype=float)
-        norm = np.linalg.norm(fwd_vec)
-        if norm > 1e-6:
-            fwd_vec_normalized = fwd_vec / norm
-        else:
-            fwd_vec_normalized = np.array([0, -1.0]) # Default up
+            if pressure:
+                frame_pil = Player.draw_pressure(
+                    players=players,
+                    frame=frame_pil,
+                    target_id=args.target_id,
+                )
 
-        arrow_end = arrow_origin + fwd_vec_normalized * arrow_length
-        arrow_origin_int = tuple(arrow_origin.astype(int))
-        arrow_end_int = tuple(arrow_end.astype(int))
-        frame_pil = cv2.arrowedLine(np.array(frame_pil), arrow_origin_int, arrow_end_int, 
-                        arrow_color, arrow_thickness, tipLength=0.3)
-        
-        # Draw Frame Number
-        frame_pil = cv2.putText(
-            np.array(frame_pil), f"Frame: {frame_count}", (10, 30), 
-            cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA
-        )
-        
-        frame_final = cv2.cvtColor(np.array(frame_pil), cv2.COLOR_RGB2BGR)
-            # frame_final remains frame_np if error occurred
+            if body_orientation:
+                frame_pil = Player.draw_body_orientation(
+                    players=players,
+                    frame=frame_pil,
+                    target_id=args.target_id,
+                )
+            
+            if scanning:
+                frame_pil = Player.draw_scanning(
+                    players=players,
+                    frame=frame_pil,
+                    target_id=args.target_id,
+                )
 
-        # 9. Write Frame using Norfair's Video object
-        # This assumes Norfair handles potential errors internally
-        video.write(frame_final) 
+            # Draw ball (optional)
+            if ball:
+                # Ensure ball.draw handles PIL Image and RGB color
+                frame_pil = ball.draw(frame_pil) # Example green ball (RGB)
+
+            # Draw arrow for orientation - adjust as needed
+            frame_pil = draw_arrow(
+                frame_pil=frame_pil,
+                fwd_vec = np.array(FORWARD_VECTOR, dtype=float), # Example forward vector
+            )
+            
+            
+            # Draw Frame Number
+            frame_pil = cv2.putText(
+                np.array(frame_pil), f"Frame: {frame_count}", (10, 30), 
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA
+            )
+            
+            frame_final = cv2.cvtColor(np.array(frame_pil), cv2.COLOR_RGB2BGR)
+                # frame_final remains frame_np if error occurred
+
+            # 9. Write Frame using Norfair's Video object
+            # This assumes Norfair handles potential errors internally
+            video.write(frame_final) 
+            end_time = time.time()
+            print(f"Time taken for drawing: {end_time - start_time:.2f} seconds")
 
         # Print progress occasionally
         if (i + 1) % 100 == 0:
@@ -379,9 +366,16 @@ try:
 
 
     print(f"\nFinished processing {frame_count + 1} frames.")
-    for passs in passes_list:
-        print(f"Reception Frame {passs.reception_frame}: Pass Detected! {passs.passer_id} -> {passs.receiver_id}. Initiated around frame {passs.initiation_frame}.")
+    
 finally: # Ensure resources are released
+    df = generate_output_df(
+        time=time_list,
+        body_position=target_bp,
+        pressure=target_pressure,
+        turnable=target_turnable,
+        number_of_scans=target_number_of_scans
+    )
+    df.to_csv(args.output.replace(".mp4", ".csv"))
     print("Releasing video resources...")
     # No video.release() needed for Norfair object
     # No writer.release() needed
