@@ -13,6 +13,7 @@ def generate_output_df(time, body_position, pressure, turnable, number_of_scans)
 
 
 def update_lists(players, target_id, body_position, pressure, turnable, number_of_scans):
+    found = False
     for player in players:
         if player.detection.data['id'] == target_id:
             body_position.append(player.body_orientation)
@@ -22,6 +23,12 @@ def update_lists(players, target_id, body_position, pressure, turnable, number_o
             else:
                 turnable.append("Yes")
             number_of_scans.append("None")
-
+            found = True
             break
+
+    if not found:
+        body_position.append("None")
+        pressure.append("None")
+        turnable.append("None")
+        number_of_scans.append("None")
     return body_position, pressure, turnable, number_of_scans
