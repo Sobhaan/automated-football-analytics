@@ -68,11 +68,8 @@ parser.add_argument(
     "--body_orientation", default=True, type=str, help="Enable body orientation estimation" 
 )
 parser.add_argument(
-    "--scanning", default=False, type=str, help="Enable scanning for target player"
+    "--scanning", default=True, type=str, help="Enable scanning for target player"
 )
-# parser.add_argument(
-#     "--target_id", type=int, default=3, help="Track ID of player for orientation analysis" # Require target ID
-# )
 parser.add_argument(
     "--all_players", default=True, type=str, help="Track all players or only target player"
 )
@@ -88,7 +85,7 @@ parser.add_argument(
 
 parser.add_argument( 
     "--output", 
-    default="output/asdasdasdasddsasasadas223.mp4", # Default output name
+    default="output/scanning4k2.mp4", # Default output name
     type=str, 
     help="Path for output video file"
 )
@@ -203,8 +200,8 @@ print(id)
 smooth_window = 10
 pose_conf = 0.1
 crop_pad = 0
-#FORWARD_VECTOR = forward_vector() # Adjust based camera angle
-FORWARD_VECTOR = (-0.9978, -0.0665)
+FORWARD_VECTOR = forward_vector() # Adjust based camera angle
+#FORWARD_VECTOR = (-0.9978, -0.0665)
 print(f"FORWARD_VECTOR: {FORWARD_VECTOR}")
 estimator = BodyOrientationEstimator(
     target_id=id, 
@@ -229,7 +226,7 @@ target_pass_list = []
 body_position_list = []
 pressure_list = []
 turnable_list = []
-number_of_scans_list = []
+scan_angles_list = []
 
 # --- Final Target Values ---
 time_list = []
@@ -326,9 +323,9 @@ try:
             target_missing_frames_count = 0
         else:
             target_missing_frames_count += 1
-            print(f"Target ID {id} missing for {target_missing_frames_count} frames (hit_max: {player_tracker.hit_counter_max}).")
+            print(f"Target ID {id} missing for {target_missing_frames_count} frames (max: {fps}).")
 
-        if target_missing_frames_count > fps*1.5:
+        if target_missing_frames_count > fps:
             print(f"Target ID {id} officially lost (exceeded hit_counter_max).")
             is_in_reselection_phase = True
         
@@ -357,7 +354,7 @@ try:
             players = Player.from_detections(detections=player_detections_tracked, teams=teams)
 
         match.update(players, ball, i, body_orientation, scanning, pressure, frame_np, target_id=id, estimator=estimator)
-        body_position_list, pressure_list, turnable_list, number_of_scans_list = update_lists(players, id, body_position_list, pressure_list, turnable_list, number_of_scans_list)
+        body_position_list, pressure_list, turnable_list, scan_angles_list = update_lists(players, id, body_position_list, pressure_list, turnable_list, scan_angles_list)
         passes_list = match.passes
         if len(passes_list) > len(old_passes):
             for passs in passes_list:
@@ -368,7 +365,8 @@ try:
                         target_bp.append(body_position_list[passs.initiation_frame])
                         target_pressure.append(pressure_list[passs.initiation_frame])
                         target_turnable.append(turnable_list[passs.initiation_frame])
-                        target_number_of_scans.append(number_of_scans_list[passs.initiation_frame])
+                        number_of_scans = Match.angles_to_count(scan_angles_list, passs.initiation_frame, fps)
+                        target_number_of_scans.append(number_of_scans)
                         target_pass_list.append(passs)
         old_passes = passes_list
         
@@ -429,7 +427,7 @@ try:
             )
             
             frame_final = cv2.cvtColor(np.array(frame_pil), cv2.COLOR_RGB2BGR)
-                # frame_final remains frame_np if error occurred
+            # frame_final remains frame_np if error occurred
 
             # 9. Write Frame using Norfair's Video object
             # This assumes Norfair handles potential errors internally
@@ -454,7 +452,4 @@ finally: # Ensure resources are released
     )
     df.to_csv(args.output.replace(".mp4", ".csv"))
     print("Releasing video resources...")
-    # No video.release() needed for Norfair object
-    # No writer.release() needed
     print(f"Output video should be saved to {args.output} by Norfair.")
-    print("Cleanup finished.")

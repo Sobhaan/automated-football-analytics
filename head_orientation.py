@@ -3,6 +3,13 @@ import math
 import cv2
 from ultralytics import YOLO
 from IPython.display import display
+from matplotlib import pyplot as plt
+from gluoncv import model_zoo, data, utils
+from gluoncv.data.transforms.pose import detector_to_simple_pose, heatmap_to_coord
+import mxnet as mx
+import cv2
+import numpy as np
+from gluoncv.data.transforms.presets.ssd import transform_test
 
 def estimate_head_pose_angles(keypoints_per_frame, conf_threshold=0.1, conf_yaw_scale=30.0):
     """
@@ -215,65 +222,68 @@ def keypoints_pose(image, player_detections_df, target_id, model='yolov8x-pose-p
             # cv2.imwrite('output/orientationorg.jpg', output_image)
         return keypoint_list
     
-def keypoints_pose_solo(image, player, model='yolov8x-pose-p6.pt', visualisation=False):
-
-    x1 = int(player.detection.points[0][0]); y1 = int(player.detection.points[0][1])
-    x2 = int(player.detection.points[1][0]); y2 = int(player.detection.points[1][1])
-    crop_padding = 10
+def keypoints_pose_solo(image, player, model='yolov8x-pose-p6.pt', visualisation=False):    
+    detector = model_zoo.get_model('yolo3_mobilenet1.0_coco', pretrained=True)
+    pose_net = model_zoo.get_model('simple_pose_resnet152_v1d', pretrained=True)
+    detector.reset_class(["person"], reuse_weights=['person'])
+    
+    # Extract bbox
+    x1 = int(player.detection.points[0][0])
+    y1 = int(player.detection.points[0][1])
+    x2 = int(player.detection.points[1][0])
+    y2 = int(player.detection.points[1][1])
+    
+    # Crop
     frame_h, frame_w = image.shape[:2]
-    pad_x1 = max(0, x1 - crop_padding)
-    pad_y1 = max(0, y1 - crop_padding)
-    pad_x2 = min(frame_w, x2 + crop_padding)
-    pad_y2 = min(frame_h, y2 + crop_padding)
+    pad_x1 = max(0, x1)
+    pad_y1 = max(0, y1)
+    pad_x2 = min(frame_w, x2)
+    pad_y2 = min(frame_h, y2)
+    
+    image_cropped = image[pad_y1:pad_y2, pad_x1:pad_x2]
+    
+    cv_img_rgb = cv2.cvtColor(image_cropped, cv2.COLOR_BGR2RGB)
+    mx_img = mx.nd.array(cv_img_rgb, dtype='uint8')
+    
+    # Transform for detection
+    x, img = transform_test([mx_img], short=512)
+    
+    # Run detection
+    class_IDs, scores, bounding_boxs = detector(x)
+    
+    # Pose estimation
+    pose_input, upscale_bbox = detector_to_simple_pose(img, class_IDs, scores, bounding_boxs, thr=0.1)
+    
+    # Run pose model
+    predicted_heatmap = pose_net(pose_input)
+    
+    # Get coordinates
+    pred_coords, confidence = heatmap_to_coord(predicted_heatmap, upscale_bbox)
+    
+    coords = pred_coords[0].asnumpy()
+    confs = confidence[0].asnumpy().squeeze(-1)
+    
+    # Stack
+    kpts = np.concatenate([coords, confs[:, None]], axis=1)
+    # img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    # h, w = img.shape[:2]
+    # for idx, kp in enumerate(kpts):
+    # # Convert relative coordinates to absolute
+    #     if idx < 5:
+    #         x_rel, y_rel, conf = kp
 
-    if pad_x1 < pad_x2 and pad_y1 < pad_y2:
-        image = image[pad_y1:pad_y2, pad_x1:pad_x2]
-        model = YOLO(model)
-        # images, res = crop_focused_player(target_player_id=target_player_id, video_path=video_path)
-        keypoint_list = []
-        results = model(image)
-        # Create visualization without text
-        output_image = image.copy()
-        
-        keypoints = results[0].keypoints.data.cpu().numpy()
-        
-        if len(list(keypoints)) == 1:
-            print("No keypoints")
-            results = model(image, conf=0.01)
-            keypoints = results[0].keypoints.data.cpu().numpy()
-        if len(list(keypoints)) == 1:
-            print("Still no keypoints")
-            results = model(image, conf=0.003)
-            keypoints = results[0].keypoints.data.cpu().numpy()
-        keypoint_list.append(keypoints)
-        # Keypoint names
-        keypoint_names = [
-            "nose", "l_eye", "r_eye", "l_ear", "r_ear", 
-            "l_shoulder", "r_shoulder", "l_elbow", "r_elbow", "l_wrist", "r_wrist",
-            "l_hip", "r_hip", "l_knee", "r_knee", "l_ankle", "r_ankle"
-        ]
+    #         # Draw the keypoint
+    #         # Calculate the end point for the shoulder_vector line
+    #         start_draw_point_x = w // 2
+    #         start_draw_point_y = h // 2
+    #         cv2.circle(img, (int(x_rel), int(y_rel)), 1, (0,255,0), 1)
+    #         # Optionally, you can label the keypoint index
 
-        # Draw keypoints with small labels
-        if visualisation:
-            for person in keypoints:
-                for i, kp in enumerate(person):
-                    x, y, conf = kp
-                    print("number: ", i, "coords:" ,x, y, "confidence: ", conf, "label name: ",keypoint_names[i])
-                    if conf > 0.5:  # Only draw high-confidence keypoints
-                        # Draw keypoint
-                        cv2.circle(output_image, (int(x), int(y)), 1, (0, 255, 0), -1)
-                        # Add small label
-                        label = keypoint_names[i]
-                        cv2.putText(output_image, str(i), (int(x)+1, int(y)+1), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.18, (0, 0, 255), 1)
-                        
-            window_name = "Pose Keypoints"
-            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(window_name, 640, 640)
-            cv2.imshow(window_name, output_image)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-            cv2.imwrite('4kbbox.png', output_image)
+    #         #cv2.putText(img, txt, start_draw_point, cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,0), 1, cv2.LINE_AA)
+    #         cv2.putText(img, str(idx), (int(x_rel), int(y_rel)),
+    #                     cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255,255,255), 1, cv2.LINE_AA)
 
-            # cv2.imwrite('output/orientationorg.jpg', output_image)
-        return keypoint_list
+    # cv2.imshow('Keypoints', img)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+    return kpts
