@@ -12,9 +12,13 @@ from soccer.team import Team
 import time
 import pandas as pd
 from body_orientation import BodyOrientationEstimator # Ensure this file exists
-from head_orientation import estimate_head_pose_angles, keypoints_pose_solo
+from head_orientation import estimate_head_pose_angles, keypoints_pose_solo, count_scans
 import math 
 from itertools import islice
+from gluoncv import model_zoo, data, utils
+import mxnet as mx
+
+
 
 class Match:
     def __init__(self, home: Team, away: Team, fps: int = 30):
@@ -39,6 +43,10 @@ class Match:
         self.possession_counter = 0
         self.closest_player = None
         self.ball = None
+        self.detector = model_zoo.get_model('yolo3_mobilenet1.0_coco', pretrained=True)
+        self.pose_net = model_zoo.get_model('simple_pose_resnet152_v1d', pretrained=True, ctx=mx.gpu(0))
+        self.detector.reset_class(["person"], reuse_weights=['person'])
+        
         self.shoulder_vec = [0,0]
         # Amount of consecutive frames new team has to have the ball in order to change possession
         self.possesion_counter_threshold = 20
@@ -49,7 +57,7 @@ class Match:
         self.pass_event = PassEvent()
 
     def update(self, players: List[Player], ball: Ball, frame_idx: int, body_orientation: bool, scanning: bool, pressure: bool, frame_np: np.ndarray = None, 
-               target_id: int = 0, estimator: BodyOrientationEstimator = None):
+               scan_angles_lists: List[float] = None, target_id: int = 0, estimator: BodyOrientationEstimator = None):
         """
 
         Update match possession and closest player
@@ -71,7 +79,7 @@ class Match:
 
         if scanning:
             self.update_scanning(
-                players=players, frame_np=frame_np, target=target_id
+                players=players, frame_np=frame_np, target=target_id, scan_angles_lists=scan_angles_lists
             )
         
         self.update_possession()
@@ -137,7 +145,7 @@ class Match:
                 #     print(f"Error processing body orientation: {e}")
                 #     player.body_orientation = "Unknown"
 
-    def update_scanning(self, players: List[Player], target: int = 0, frame_np: np.ndarray = None):
+    def update_scanning(self, players: List[Player], target: int = 0, frame_np: np.ndarray = None, scan_angles_lists: List[float] = None):
         """
         Update scanning of players
 
@@ -149,10 +157,29 @@ class Match:
         
         for player in players:
             if player.detection.data["id"] == target:
-                keypoints = keypoints_pose_solo(frame_np, player)
-                angles = estimate_head_pose_angles(keypoints, conf_threshold=0.1, conf_yaw_scale=30.0)
-                if not np.isnan(angles[0][0]):
-                    player.scanning = angles             
+                keypoints = keypoints_pose_solo(frame_np, player, self.detector, self.pose_net)
+                yaw, pitch, roll = estimate_head_pose_angles(keypoints, conf_threshold=0.1)
+                if pd.isna(yaw) or pd.isna(pitch) or pd.isna(roll):
+                    yaw, pitch, roll = scan_angles_lists[-1]
+                player.scanning = yaw, pitch, roll
+
+    @staticmethod
+    def angles_to_count(angles_lists, initiation_frame, fps):
+        relevant_angles = angles_lists[:initiation_frame]
+        print(angles_lists)
+        in_advance = 3 * fps
+        if in_advance > len(relevant_angles):
+            in_advance = angles_lists
+        print(in_advance)
+        print(len(angles_lists))
+        relevant_angles = relevant_angles[:-int(in_advance)]
+        print(relevant_angles)
+        number_of_scans = count_scans(relevant_angles, fps)
+        print(f"Number of scans: {number_of_scans}")
+        return number_of_scans
+
+
+
         
         
     def update_pressure(self, players: List[Player], target: int = 0):

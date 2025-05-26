@@ -40,7 +40,6 @@ from inference.filters import filters
 import random
 # --- Import the Orientation Module ---
 from body_orientation import BodyOrientationEstimator # Ensure this file exists
-from head_orientation import estimate_head_pose_angles, keypoints_pose
 from auto_hsv_generator import generate_auto_hsv_filters
 import time
 from output import generate_output_df, update_lists
@@ -51,7 +50,7 @@ from auto_id import select_target_player_id_on_first_frame
 parser = argparse.ArgumentParser(description="Soccer Video Analytics with Target Orientation")
 parser.add_argument(
     "--video",
-    default="../FootieStats/data/alnassr.mp4", # ADJUST PATH AS NEEDED
+    default="../FootieStats/data/BPVU.mp4", # ADJUST PATH AS NEEDED
     type=str,
     help="Path to the input video",
 )
@@ -85,7 +84,7 @@ parser.add_argument(
 
 parser.add_argument( 
     "--output", 
-    default="output/scanning4k2.mp4", # Default output name
+    default="output/realtest.mp4", # Default output name
     type=str, 
     help="Path for output video file"
 )
@@ -177,7 +176,7 @@ ball_tracker = Tracker(
     distance_function="iou", 
     distance_threshold=150,  # Keep fixed or make arg
     initialization_delay=0,   
-    hit_counter_max=60,       
+    hit_counter_max=100,       
 )
 
 motion_estimator = MotionEstimator()
@@ -245,7 +244,7 @@ try:
         print(f"Processing frame {i}...") # Debug print
         print(is_in_reselection_phase)
 
-        if i == 1050: break
+        if i == 275: break
         if wait_frames_countdown > 0:
             print(f"Waiting... {wait_frames_countdown} frames remaining.")
             wait_frames_countdown -= 1
@@ -353,7 +352,7 @@ try:
         else:
             players = Player.from_detections(detections=player_detections_tracked, teams=teams)
 
-        match.update(players, ball, i, body_orientation, scanning, pressure, frame_np, target_id=id, estimator=estimator)
+        match.update(players, ball, i, body_orientation, scanning, pressure, frame_np, scan_angles_list, target_id=id, estimator=estimator)
         body_position_list, pressure_list, turnable_list, scan_angles_list = update_lists(players, id, body_position_list, pressure_list, turnable_list, scan_angles_list)
         passes_list = match.passes
         if len(passes_list) > len(old_passes):
@@ -368,6 +367,7 @@ try:
                         number_of_scans = Match.angles_to_count(scan_angles_list, passs.initiation_frame, fps)
                         target_number_of_scans.append(number_of_scans)
                         target_pass_list.append(passs)
+                        print(f"Target Player {id} received a pass at frame {passs.initiation_frame}. Body Position: {body_position_list[passs.initiation_frame]}, Pressure: {pressure_list[passs.initiation_frame]}, Turnable: {turnable_list[passs.initiation_frame]}, Number of Scans: {number_of_scans}")
         old_passes = passes_list
         
         

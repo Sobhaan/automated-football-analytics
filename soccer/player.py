@@ -61,7 +61,7 @@ class Player:
         self.smoothed_orientation = "Unknown" # Store smoothed orientation string
         self.body_orientation = "Unknown" # Store body orientation string
         self.pressure = "None"
-        self.scanning = None
+        self.scanning = "None"
 
         self.head_orientation = None
         # if detection and isinstance(detection, Detection):
@@ -424,7 +424,7 @@ class Player:
                 size=250
                 origin_int = tuple(map(int, origin))
                 print(player.scanning)
-                yaw, pitch, roll = player.scanning[0]
+                yaw, pitch, roll = player.scanning
                 pitch_rad = math.radians(pitch)
                 yaw_rad = math.radians(yaw)
                 roll_rad = math.radians(roll)

@@ -8,6 +8,7 @@ from ultralytics import YOLO
 import cv2
 from typing import List, Dict, Any, Tuple, Optional
 from soccer.player import Player
+import time
 
 # --- Helper Functions ---
 def angle_difference(angle1_rad, angle2_rad):
@@ -101,53 +102,6 @@ class BodyOrientationEstimator:
         elif angle_deg > 110:
             label = "Closed"
         
-        
-        # img = frame.copy()
-        # # print(kpts)
-        # h, w = img.shape[:2]
-        # print(perp_vector, forward_vector, shoulder_vector)
-        # print(kpts)
-        # for idx, kp in enumerate(kpts):
-        # # Convert relative coordinates to absolute
-        #     x_rel, y_rel, conf = kp
-
-        #     # Draw the keypoint
-        #     # Calculate the end point for the shoulder_vector line
-        #     start_draw_point_x = w // 2
-        #     start_draw_point_y = h // 2
-        #     start_draw_point = (start_draw_point_x, start_draw_point_y-10)
-        #     end_point_shoulder_x = start_draw_point_x + int(shoulder_vector[0] * 20)
-        #     end_point_shoulder_y = start_draw_point_y + int(shoulder_vector[1] * 20)
-        #     end_point_shoulder = (end_point_shoulder_x, end_point_shoulder_y)
-
-        #     # Calculate the end point for the perp_vector line
-        #     end_point_perp_x = start_draw_point_x + int(perp_vector[0] * 20)
-        #     end_point_perp_y = start_draw_point_y + int(perp_vector[1] * 20)
-        #     end_point_perp = (end_point_perp_x, end_point_perp_y)
-
-        #     end_forward_x = start_draw_point_x + int(forward_vector[0] * 20)
-        #     end_forward_y = start_draw_point_y + int(forward_vector[1] * 20)
-        #     end_forward = (end_forward_x, end_forward_y)
-        #     cv2.circle(img, (int(x_rel), int(y_rel)), 2, (0,255,0), 1)
-        #     cv2.line(img, start_draw_point, end_point_perp, (255,0,0), 1)
-        #     cv2.line(img, start_draw_point, end_forward, (0,255,0), 1)
-        #     cv2.line(img, start_draw_point, end_point_shoulder, (0,0,255), 1)
-        #     # Optionally, you can label the keypoint index
-        #     if not math.isnan(float(angle_deg)): 
-        #         txt = str(int(angle_deg))
-        #     else:
-        #         txt = "NAN"
-        #     cv2.putText(img, txt, start_draw_point, cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,0), 1, cv2.LINE_AA)
-        #     cv2.putText(img, str(idx), (int(x_rel), int(y_rel)),
-        #                 cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255,255,255), 1, cv2.LINE_AA)
-        # img = cv2.resize(
-        #     img,
-        #     (int(w * 4), int(h * 4)),
-        #     interpolation=cv2.INTER_LINEAR
-        # )
-        # cv2.imshow('Keypoints', img)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
         return label, shoulder_vector
 
     def _smooth_orientation(self, current_orientation: str) -> str:
@@ -181,10 +135,8 @@ class BodyOrientationEstimator:
             otherwise None. Keys: 'keypoints', 'orientation_raw', 'orientation_smooth'.
             Keypoints are in ABSOLUTE frame coordinates.
         """
-
         x1 = int(player.detection.points[0][0]); y1 = int(player.detection.points[0][1])
         x2 = int(player.detection.points[1][0]); y2 = int(player.detection.points[1][1])
-
         # --- 1. Crop Target Player ---
         frame_h, frame_w = frame.shape[:2]
         pad_x1 = max(0, x1 - self.crop_padding)
@@ -199,7 +151,6 @@ class BodyOrientationEstimator:
 
         # --- 2. Run Pose on Crop ---
         pose_results_crop = self.pose_model.predict(cropped_image, verbose=False, conf=self.pose_conf_threshold, imgsz=960)
-
         # --- 3. Extract Keypoints (Assume first/best detection in crop) ---
         keypoints_list = pose_results_crop[0].keypoints.data.cpu().numpy()
         keypoints_rel = keypoints_list[0] # Shape [K, 3] relative to crop
@@ -215,7 +166,6 @@ class BodyOrientationEstimator:
 
         # --- 5. Smooth Orientation ---
         smoothed_orientation = self._smooth_orientation(raw_orientation)
-
         # --- 6. Return Results for Target Player ---
         return {
             'orientation_raw': raw_orientation,

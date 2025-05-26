@@ -134,7 +134,9 @@ def select_target_player_id_on_first_frame( # Renaming for clarity might be good
     )
     frame_with_ids_bgr = cv2.cvtColor(np.array(frame_with_ids_pil), cv2.COLOR_RGB2BGR)
     window_title = f"Select Target (InitDelay:{tracker_init_delay_for_selection_frames}) - Click, then ENTER in Window"
-    cv2.imshow(window_title, frame_with_ids_bgr)
+    imS = cv2.resize(frame_with_ids_bgr, (960, 540))
+
+    cv2.imshow(window_title, imS)
     cv2.setMouseCallback(window_title, get_player_id_by_click) # Your existing callback
 
     print(f"\nAvailable Player IDs (after {num_frames_to_process_for_ids} frames):", sorted(list(set(detected_ids_for_prompt))))
@@ -269,8 +271,8 @@ def handle_target_reselection(
     if text_y_pos < 20: text_y_pos = 20 
     cv2.putText(frame_with_ids_bgr, prompt_on_image, (10, text_y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,0), 2, cv2.LINE_AA) 
     cv2.putText(frame_with_ids_bgr, prompt_on_image, (10, text_y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1, cv2.LINE_AA)
-
-    cv2.imshow(window_title, frame_with_ids_bgr)
+    imS = cv2.resize(frame_with_ids_bgr, (960, 540))
+    cv2.imshow(window_title, imS)
     cv2.setMouseCallback(window_title, get_player_id_by_click)
 
     if detected_ids_in_current_frame:

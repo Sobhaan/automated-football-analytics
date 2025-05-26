@@ -10,223 +10,226 @@ import mxnet as mx
 import cv2
 import numpy as np
 from gluoncv.data.transforms.presets.ssd import transform_test
+import time
+import os
 
-def estimate_head_pose_angles(keypoints_per_frame, conf_threshold=0.1, conf_yaw_scale=30.0):
+def estimate_head_pose_angles(kps, conf_threshold=0.1):
     """
-    Estimates head pose angles, attempting different heuristics based on view.
-
-    Args:
-        keypoints_per_frame (list): List of keypoint arrays, each shape (1, N, 3).
-                                    Indices: 0:Nose, 1:LEye, 2:REye, 3:LEar, 4:REar, 
-                                             5:LShoulder, 6:RShoulder.
-        conf_threshold (float): Minimum confidence for keypoints.
-        conf_yaw_scale (float): Yaw adjustment scale based on eye confidence diff.
-
-    Returns:
-        list: List of (yaw, pitch, roll) tuples in degrees, or (nan, nan, nan).
-    """
-    all_angles = []
+    Estimates head pose angles from a single frame's keypoints with improved calculations.
     
-    # Indices
-    NOSE, L_EYE, R_EYE, L_EAR, R_EAR, L_SHOULDER, R_SHOULDER = 0, 1, 2, 3, 4, 5, 6
-    MIN_KP_INDEX = max(NOSE, L_EYE, R_EYE, L_EAR, R_EAR, L_SHOULDER, R_SHOULDER)
-
-    for kps_frame_data in keypoints_per_frame:
-        yaw, pitch, roll = np.nan, np.nan, np.nan # Default to failure
-
-        # --- Input Handling & Basic Checks ---
-        if not isinstance(kps_frame_data, np.ndarray) or kps_frame_data.ndim != 3 or kps_frame_data.shape[0] < 1:
-            all_angles.append((yaw, pitch, roll)) 
-            continue
-        kps = kps_frame_data[0] # Use first detected person
-
-        if kps.ndim != 2 or kps.shape[1] != 3 or kps.shape[0] <= MIN_KP_INDEX:
-             all_angles.append((yaw, pitch, roll))
-             continue
-
-        # --- Get Keypoint Data ---
-        kp_data = {i: {'pt': kps[i][:2], 'conf': kps[i][2]} for i in range(kps.shape[0])}
+    Args:
+        kps (numpy.ndarray): Keypoint array of shape (17, 3) where each row is [x, y, confidence].
+                            Expected keypoint order (COCO format):
+                            0: Nose
+                            1: Left Eye
+                            2: Right Eye
+                            3: Left Ear
+                            4: Right Ear
+                            5: Left Shoulder
+                            6: Right Shoulder
+                            ... (remaining body keypoints)
+        conf_threshold (float): Minimum confidence threshold for using a keypoint.
+    
+    Returns:
+        tuple: (yaw, pitch, roll) in degrees, or (np.nan, np.nan, np.nan) if estimation fails.
+    """
+    # Initialize with failure values
+    yaw, pitch, roll = np.nan, np.nan, np.nan
+    
+    # Keypoint indices for clarity
+    NOSE = 0
+    L_EYE = 1
+    R_EYE = 2
+    L_EAR = 3
+    R_EAR = 4
+    L_SHOULDER = 5
+    R_SHOULDER = 6
+    
+    # Validate input
+    if kps is None or len(kps) < 7:
+        return yaw, pitch, roll
+    
+    # Helper function to check if a keypoint is valid
+    def is_valid(idx):
+        return idx < len(kps) and kps[idx, 2] >= conf_threshold
+    
+    # Extract 2D positions for valid keypoints
+    def get_point(idx):
+        return kps[idx, :2]
+    
+    # --- Frontal View Estimation (most reliable) ---
+    if is_valid(NOSE) and is_valid(L_EYE) and is_valid(R_EYE):
+        nose = get_point(NOSE)
+        l_eye = get_point(L_EYE)
+        r_eye = get_point(R_EYE)
         
-        def is_ok(kp_index):
-            return kp_index in kp_data and kp_data[kp_index]['conf'] >= conf_threshold
-
-        # --- View Classification & Calculation ---
-        view_type = "undetermined"
-
-        # Frontal View Logic
-        if is_ok(NOSE) and is_ok(L_EYE) and is_ok(R_EYE):
-            view_type = "frontal"
-            nose_pt = kp_data[NOSE]['pt']
-            l_eye_pt = kp_data[L_EYE]['pt']
-            r_eye_pt = kp_data[R_EYE]['pt']
+        # Calculate eye center and inter-eye distance
+        eye_center = (l_eye + r_eye) / 2.0
+        eye_vector = r_eye - l_eye
+        eye_distance = np.linalg.norm(eye_vector)
+        
+        if eye_distance > 1e-6:  # Avoid division by zero
+            # Roll: angle of the eye line from horizontal
+            roll = math.degrees(math.atan2(eye_vector[1], eye_vector[0]))
+            # Normalize roll to [-90, 90] range
+            if roll > 90:
+                roll -= 180
+            elif roll < -90:
+                roll += 180
             
-            eye_midpoint = (l_eye_pt + r_eye_pt) / 2.0
-            eye_vector = r_eye_pt - l_eye_pt
-            eye_dist = np.linalg.norm(eye_vector)
-
-            if eye_dist > 1e-6:
-                eye_mid_to_nose_vector = nose_pt - eye_midpoint
-                
-                # Roll
-                roll_rad = math.atan2(eye_vector[1], eye_vector[0])
-                roll = math.degrees(roll_rad)
-                roll = roll if roll <= 90 else roll - 180 
-                roll = roll if roll >= -90 else roll + 180
-
-                # Pitch
-                pitch_ratio = np.clip(eye_mid_to_nose_vector[1] / eye_dist, -1.0, 1.0)
-                pitch = -math.degrees(math.asin(pitch_ratio)) 
-
-                # Yaw (Geometric + Confidence)
-                yaw_ratio = np.clip(eye_mid_to_nose_vector[0] / eye_dist, -1.0, 1.0)
-                yaw_geom = math.degrees(math.asin(yaw_ratio))
-                
-                yaw_adjustment = 0.0
-                if conf_yaw_scale > 0:
-                    eye_conf_diff = kp_data[R_EYE]['conf'] - kp_data[L_EYE]['conf']
-                    yaw_adjustment = -eye_conf_diff * conf_yaw_scale * (1.0 - abs(yaw_ratio))
-                
-                yaw = yaw_geom + yaw_adjustment
+            # Vector from eye center to nose
+            eye_to_nose = nose - eye_center
             
-        # Back View Logic (Simplified)
-        elif is_ok(L_EAR) and is_ok(R_EAR) and is_ok(L_SHOULDER) and is_ok(R_SHOULDER) and not (is_ok(L_EYE) or is_ok(R_EYE)):
-            view_type = "back"
-            l_ear_pt = kp_data[L_EAR]['pt']
-            r_ear_pt = kp_data[R_EAR]['pt']
-            l_shoulder_pt = kp_data[L_SHOULDER]['pt']
-            r_shoulder_pt = kp_data[R_SHOULDER]['pt']
-
-            yaw = 180.0 # Assume facing directly away
-            pitch = 0.0 # Very hard to estimate pitch from back reliably
-
-            # Roll based on ear tilt relative to shoulder tilt
-            ear_vector = r_ear_pt - l_ear_pt
-            shoulder_vector = r_shoulder_pt - l_shoulder_pt
-            norm_ear = np.linalg.norm(ear_vector)
-            norm_shoulder = np.linalg.norm(shoulder_vector)
-
-            if norm_ear > 1e-6 and norm_shoulder > 1e-6:
-                 roll_rad_ear = math.atan2(ear_vector[1], ear_vector[0])
-                 roll_rad_shoulder = math.atan2(shoulder_vector[1], shoulder_vector[0])
-                 roll_rad = roll_rad_ear - roll_rad_shoulder
-                 roll_rad = (roll_rad + math.pi) % (2 * math.pi) - math.pi # Normalize
-                 roll = math.degrees(roll_rad)
+            # Pitch estimation with improved calculation
+            # Account for typical facial proportions where nose is below eyes
+            vertical_ratio = eye_to_nose[1] / eye_distance
+            # In neutral pose, nose is typically 0.3-0.5 eye distances below eye line
+            # Adjust for this baseline offset
+            adjusted_pitch_ratio = (vertical_ratio - 0.4) * 2.0
+            adjusted_pitch_ratio = np.clip(adjusted_pitch_ratio, -1.0, 1.0)
+            # Scale down slightly as faces don't tilt as extremely as the math suggests
+            pitch = -math.degrees(math.asin(adjusted_pitch_ratio)) * 0.7
+            
+            # Yaw estimation with improved scaling
+            horizontal_ratio = eye_to_nose[0] / eye_distance
+            horizontal_ratio = np.clip(horizontal_ratio, -1.0, 1.0)
+            # The original formula underestimates yaw, so we scale it up
+            # This factor was determined empirically to match typical head turn angles
+            yaw = math.degrees(math.asin(horizontal_ratio)) * 1.5
+            
+            # Confidence-based yaw refinement
+            # When the head turns, the farther eye often has lower detection confidence
+            eye_conf_diff = kps[R_EYE, 2] - kps[L_EYE, 2]
+            # Scale the adjustment based on how frontal the face is
+            # (less adjustment when face is more turned)
+            conf_adjustment = eye_conf_diff * 25.0 * (1.0 - abs(horizontal_ratio))
+            yaw += conf_adjustment
+    
+    # --- Back View Estimation ---
+    elif is_valid(L_EAR) and is_valid(R_EAR) and not is_valid(L_EYE) and not is_valid(R_EYE):
+        # Person is facing away from camera
+        l_ear = get_point(L_EAR)
+        r_ear = get_point(R_EAR)
+        
+        # Use ear confidence difference to estimate slight head turns
+        ear_conf_diff = kps[R_EAR, 2] - kps[L_EAR, 2]
+        # Base yaw is 180° (facing away) with adjustment based on which ear is clearer
+        yaw = 180.0 + ear_conf_diff * 30.0
+        
+        # Roll from ear positions
+        ear_vector = r_ear - l_ear
+        if np.linalg.norm(ear_vector) > 1e-6:
+            roll = math.degrees(math.atan2(ear_vector[1], ear_vector[0]))
+            if roll > 90:
+                roll -= 180
+            elif roll < -90:
+                roll += 180
+        else:
+            roll = 0.0
+        
+        # Pitch is very difficult to estimate from back view
+        pitch = 0.0
+    
+    # --- Left Profile Estimation ---
+    elif is_valid(L_EAR) and not is_valid(R_EAR) and not is_valid(R_EYE):
+        # Person is looking to their right (left side visible to camera)
+        yaw = -90.0  # Base angle for left profile
+        
+        # Try to refine using eye position if available
+        if is_valid(L_EYE):
+            l_ear = get_point(L_EAR)
+            l_eye = get_point(L_EYE)
+            ear_eye_vec = l_eye - l_ear
+            
+            # Horizontal component indicates how much they're turned toward/away from camera
+            if np.linalg.norm(ear_eye_vec) > 1e-6:
+                # If eye is forward of ear, person is turning slightly toward camera
+                horizontal_offset = ear_eye_vec[0]
+                yaw += horizontal_offset * 0.3  # Scale factor for adjustment
+                
+                # Roll from ear-eye angle
+                roll = math.degrees(math.atan2(ear_eye_vec[1], ear_eye_vec[0]))
             else:
-                 roll = 0.0 # Default roll if distances are too small
-
-        # Profile View Logic (Simplified Heuristics)
-        # Add more checks (e.g., nose visibility) if needed for better classification
-        elif is_ok(L_EAR) and not is_ok(R_EAR) and not is_ok(R_EYE): # Likely Left Profile (person looking right)
-             view_type = "left_profile"
-             yaw = -90.0
-             pitch = 0.0
-             # Try roll based on L_Eye / L_Ear if L_Eye visible
-             if is_ok(L_EYE):
-                 l_eye_pt = kp_data[L_EYE]['pt']
-                 l_ear_pt = kp_data[L_EAR]['pt']
-                 ear_eye_vec = l_eye_pt - l_ear_pt
-                 if np.linalg.norm(ear_eye_vec) > 1e-6:
-                      # This assumes ear-eye line is horizontal in neutral pose
-                      roll = math.degrees(math.atan2(ear_eye_vec[1], ear_eye_vec[0])) 
-                 else: roll = 0.0
-             else: roll = 0.0 # Default if eye not visible
-
-        elif is_ok(R_EAR) and not is_ok(L_EAR) and not is_ok(L_EYE): # Likely Right Profile (person looking left)
-             view_type = "right_profile"
-             yaw = 90.0
-             pitch = 0.0
-             # Try roll based on R_Eye / R_Ear if R_Eye visible
-             if is_ok(R_EYE):
-                 r_eye_pt = kp_data[R_EYE]['pt']
-                 r_ear_pt = kp_data[R_EAR]['pt']
-                 ear_eye_vec = r_eye_pt - r_ear_pt
-                 if np.linalg.norm(ear_eye_vec) > 1e-6:
-                      roll = math.degrees(math.atan2(ear_eye_vec[1], ear_eye_vec[0]))
-                 else: roll = 0.0
-             else: roll = 0.0
-
-        # Clamp results before appending
+                roll = 0.0
+        else:
+            roll = 0.0
+        
+        pitch = 0.0  # Hard to estimate from profile
+    
+    # --- Right Profile Estimation ---
+    elif is_valid(R_EAR) and not is_valid(L_EAR) and not is_valid(L_EYE):
+        # Person is looking to their left (right side visible to camera)
+        yaw = 90.0  # Base angle for right profile
+        
+        # Try to refine using eye position if available
+        if is_valid(R_EYE):
+            r_ear = get_point(R_EAR)
+            r_eye = get_point(R_EYE)
+            ear_eye_vec = r_eye - r_ear
+            
+            # Horizontal component indicates how much they're turned toward/away from camera
+            if np.linalg.norm(ear_eye_vec) > 1e-6:
+                # If eye is forward of ear, person is turning slightly toward camera
+                horizontal_offset = -ear_eye_vec[0]  # Negative because we're on right side
+                yaw += horizontal_offset * 0.3  # Scale factor for adjustment
+                
+                # Roll from ear-eye angle (adjusted for right side)
+                roll = math.degrees(math.atan2(ear_eye_vec[1], ear_eye_vec[0])) - 180.0
+                if roll < -90:
+                    roll += 180
+            else:
+                roll = 0.0
+        else:
+            roll = 0.0
+        
+        pitch = 0.0  # Hard to estimate from profile
+    
+    # --- Transitional/Partial View ---
+    elif is_valid(L_EAR) and is_valid(R_EAR):
+        # Both ears visible but maybe only one eye - person is partially turned
+        l_eye_valid = is_valid(L_EYE)
+        r_eye_valid = is_valid(R_EYE)
+        
+        if l_eye_valid and r_eye_valid:
+            # Actually a frontal view - recursively call frontal logic
+            # (In practice, this case should have been caught by the first condition)
+            yaw = 0.0  # Approximate as frontal
+        elif l_eye_valid and not r_eye_valid:
+            # Turning right (left eye visible, right eye not)
+            yaw = -45.0  # Between frontal and left profile
+        elif r_eye_valid and not l_eye_valid:
+            # Turning left (right eye visible, left eye not)
+            yaw = 45.0  # Between frontal and right profile
+        else:
+            # No eyes visible but both ears - closer to back view
+            # Use ear confidences to estimate direction
+            ear_conf_diff = kps[R_EAR, 2] - kps[L_EAR, 2]
+            yaw = 135.0 + ear_conf_diff * 45.0  # Range from ~90 to ~180
+        
+        # Roll from ear positions
+        l_ear = get_point(L_EAR)
+        r_ear = get_point(R_EAR)
+        ear_vector = r_ear - l_ear
+        if np.linalg.norm(ear_vector) > 1e-6:
+            roll = math.degrees(math.atan2(ear_vector[1], ear_vector[0]))
+            if roll > 90:
+                roll -= 180
+            elif roll < -90:
+                roll += 180
+        else:
+            roll = 0.0
+        
+        pitch = 0.0  # Difficult to estimate in transition
+    
+    # Clamp all values to reasonable ranges
+    if not np.isnan(yaw):
         yaw = np.clip(yaw, -180.0, 180.0)
         pitch = np.clip(pitch, -90.0, 90.0)
         roll = np.clip(roll, -90.0, 90.0)
-        
-        all_angles.append((yaw, pitch, roll))
-        # print(f"Frame {len(all_angles)-1}: View={view_type}, Angles=({yaw:.1f}, {pitch:.1f}, {roll:.1f})") # Debug print
+    return yaw, pitch, roll
 
-    return all_angles
-
-
-def keypoints_pose(image, player_detections_df, target_id, model='yolov8x-pose-p6.pt', visualisation=False):
-    target_row = player_detections_df[player_detections_df['id'] == target_id]
-    if player_detections_df.empty or 'id' not in player_detections_df.columns or target_row.empty:
-        return None
-    bbox_data = target_row.iloc[0]
-    x1 = int(bbox_data['xmin']); y1 = int(bbox_data['ymin'])
-    x2 = int(bbox_data['xmax']); y2 = int(bbox_data['ymax'])
-    crop_padding = 10
-    frame_h, frame_w = image.shape[:2]
-    pad_x1 = max(0, x1 - crop_padding)
-    pad_y1 = max(0, y1 - crop_padding)
-    pad_x2 = min(frame_w, x2 + crop_padding)
-    pad_y2 = min(frame_h, y2 + crop_padding)
-
-    if pad_x1 < pad_x2 and pad_y1 < pad_y2:
-        image = image[pad_y1:pad_y2, pad_x1:pad_x2]
-        model = YOLO(model)
-        # images, res = crop_focused_player(target_player_id=target_player_id, video_path=video_path)
-        keypoint_list = []
-        results = model(image)
-        # Create visualization without text
-        output_image = image.copy()
-        
-        keypoints = results[0].keypoints.data.cpu().numpy()
-        
-        if len(list(keypoints)) == 1:
-            print("No keypoints")
-            results = model(image, conf=0.01)
-            keypoints = results[0].keypoints.data.cpu().numpy()
-        if len(list(keypoints)) == 1:
-            print("Still no keypoints")
-            results = model(image, conf=0.003)
-            keypoints = results[0].keypoints.data.cpu().numpy()
-        keypoint_list.append(keypoints)
-        # Keypoint names
-        keypoint_names = [
-            "nose", "l_eye", "r_eye", "l_ear", "r_ear", 
-            "l_shoulder", "r_shoulder", "l_elbow", "r_elbow", "l_wrist", "r_wrist",
-            "l_hip", "r_hip", "l_knee", "r_knee", "l_ankle", "r_ankle"
-        ]
-
-        # Draw keypoints with small labels
-        if visualisation:
-            for person in keypoints:
-                for i, kp in enumerate(person):
-                    x, y, conf = kp
-                    print("number: ", i, "coords:" ,x, y, "confidence: ", conf, "label name: ",keypoint_names[i])
-                    if conf > 0.5:  # Only draw high-confidence keypoints
-                        # Draw keypoint
-                        cv2.circle(output_image, (int(x), int(y)), 1, (0, 255, 0), -1)
-                        # Add small label
-                        label = keypoint_names[i]
-                        cv2.putText(output_image, str(i), (int(x)+1, int(y)+1), 
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.18, (0, 0, 255), 1)
-                        
-            window_name = "Pose Keypoints"
-            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-            cv2.resizeWindow(window_name, 640, 640)
-            cv2.imshow(window_name, output_image)
-            cv2.waitKey(0)
-            cv2.destroyAllWindows()
-            cv2.imwrite('4kbbox.png', output_image)
-
-            # cv2.imwrite('output/orientationorg.jpg', output_image)
-        return keypoint_list
     
-def keypoints_pose_solo(image, player, model='yolov8x-pose-p6.pt', visualisation=False):    
-    detector = model_zoo.get_model('yolo3_mobilenet1.0_coco', pretrained=True)
-    pose_net = model_zoo.get_model('simple_pose_resnet152_v1d', pretrained=True)
-    detector.reset_class(["person"], reuse_weights=['person'])
-    
+def keypoints_pose_solo(image, player, detector, pose_net, visualisation=False):
     # Extract bbox
     x1 = int(player.detection.points[0][0])
     y1 = int(player.detection.points[0][1])
@@ -250,16 +253,18 @@ def keypoints_pose_solo(image, player, model='yolov8x-pose-p6.pt', visualisation
     
     # Run detection
     class_IDs, scores, bounding_boxs = detector(x)
-    
     # Pose estimation
-    pose_input, upscale_bbox = detector_to_simple_pose(img, class_IDs, scores, bounding_boxs, thr=0.1)
+    start_time = time.time()
+    pose_input, upscale_bbox = detector_to_simple_pose(img, class_IDs, scores, bounding_boxs, thr=0.1, ctx=mx.gpu())
+    end_time = time.time()
+    print(f"Pose input preparation time: {end_time - start_time:.2f} seconds")
     
     # Run pose model
     predicted_heatmap = pose_net(pose_input)
     
     # Get coordinates
     pred_coords, confidence = heatmap_to_coord(predicted_heatmap, upscale_bbox)
-    
+    end_time = time.time()
     coords = pred_coords[0].asnumpy()
     confs = confidence[0].asnumpy().squeeze(-1)
     
@@ -267,6 +272,7 @@ def keypoints_pose_solo(image, player, model='yolov8x-pose-p6.pt', visualisation
     kpts = np.concatenate([coords, confs[:, None]], axis=1)
     # img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     # h, w = img.shape[:2]
+    # print(kpts)
     # for idx, kp in enumerate(kpts):
     # # Convert relative coordinates to absolute
     #     if idx < 5:
@@ -287,3 +293,104 @@ def keypoints_pose_solo(image, player, model='yolov8x-pose-p6.pt', visualisation
     # cv2.waitKey(0)
     # cv2.destroyAllWindows()
     return kpts
+
+def calculate_angular_difference(angle1, angle2):
+    """
+    Calculate the smallest angular difference between two angles.
+    Handles the wrap-around at 0/360 degrees.
+    
+    Args:
+        angle1, angle2: Angles in degrees
+    
+    Returns:
+        Signed angular difference in degrees (-180 to 180)
+    """
+    diff = angle2 - angle1
+    # Normalize to [-180, 180] range
+    while diff > 180:
+        diff -= 360
+    while diff < -180:
+        diff += 360
+    return diff
+
+def count_scans(yaw_angles, 
+                fps=30, 
+                min_angular_velocity=90,  # degrees per second
+                min_scan_angle=45,        # minimum total angle for a scan
+                max_scan_duration=1.0):   # maximum duration of a scan in seconds
+    """
+    Count the number of scans in a sequence of yaw angles.
+    
+    Args:
+        yaw_angles: List or array of yaw values (degrees) for each frame
+        fps: Frames per second of the data
+        min_angular_velocity: Minimum angular velocity (deg/s) to consider as scanning
+        min_scan_angle: Minimum total angular displacement for a valid scan
+        max_scan_duration: Maximum time (seconds) for a single scan motion
+        
+    Returns:
+        int: Number of scans detected
+    """
+    
+    # Convert to numpy array for easier manipulation
+    yaw_angles = [x[0] for x in yaw_angles]
+    yaw = np.array(yaw_angles)
+    
+
+    # Calculate angular velocity for each frame
+    angular_velocity = np.zeros(len(yaw))
+    
+    for i in range(1, len(yaw)):
+        # Calculate angular difference accounting for wrap-around
+        angle_diff = calculate_angular_difference(yaw[i-1], yaw[i])
+        # Convert to angular velocity (degrees per second)
+        angular_velocity[i] = angle_diff * fps
+    
+    # Smooth the angular velocity to reduce noise
+    # Using a simple moving average with window size of 3
+    window_size = 3
+    angular_velocity_smooth = np.convolve(angular_velocity, 
+                                         np.ones(window_size)/window_size, 
+                                         mode='same')
+    
+    # Find frames where angular velocity exceeds our threshold
+    # These are potential scanning movements
+    high_velocity_frames = np.where(np.abs(angular_velocity_smooth) > min_angular_velocity)[0]
+    
+    if len(high_velocity_frames) == 0:
+        return 0
+    
+    # Group consecutive high-velocity frames into scan events
+    scan_count = 0
+    i = 0
+    
+    while i < len(high_velocity_frames):
+        # Start of a potential scan
+        scan_start_idx = high_velocity_frames[i]
+        scan_end_idx = scan_start_idx
+        
+        # Find all consecutive frames that belong to this scan
+        j = i + 1
+        while j < len(high_velocity_frames):
+            # Check if this frame is close enough to be part of the same scan
+            if (high_velocity_frames[j] - high_velocity_frames[j-1] <= 3 and  # Allow small gaps
+                (high_velocity_frames[j] - scan_start_idx) / fps <= max_scan_duration):
+                scan_end_idx = high_velocity_frames[j]
+                j += 1
+            else:
+                break
+        
+        # Calculate total angular displacement for this potential scan
+        if scan_end_idx > scan_start_idx:
+            total_angle = 0
+            for k in range(scan_start_idx, min(scan_end_idx + 1, len(yaw) - 1)):
+                total_angle += abs(calculate_angular_difference(yaw[k], yaw[k+1]))
+            
+            # Check if this qualifies as a scan
+            if total_angle >= min_scan_angle:
+                scan_count += 1
+        
+        # Move to next unprocessed high-velocity frame
+        i = j
+    
+    return scan_count
