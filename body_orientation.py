@@ -120,49 +120,9 @@ class BodyOrientationEstimator:
         return smoothed_orientation
 
     
-    def process_target_player_solo(self, frame: np.ndarray,
-                               player: Player, shoulder_vector: np.ndarray) -> Optional[Dict[str, Any]]:
-        """
-        Finds the target player, crops, runs pose, calculates/smooths orientation.
-
-        Args:
-            frame: The current video frame (NumPy array BGR).
-            player_detections_df: DataFrame of ALL tracked players for this frame.
-                                 Requires 'id', 'xmin', 'ymin', 'xmax', 'ymax'.
-
-        Returns:
-            Dictionary with results for the target player if found in this frame,
-            otherwise None. Keys: 'keypoints', 'orientation_raw', 'orientation_smooth'.
-            Keypoints are in ABSOLUTE frame coordinates.
-        """
-        x1 = int(player.detection.points[0][0]); y1 = int(player.detection.points[0][1])
-        x2 = int(player.detection.points[1][0]); y2 = int(player.detection.points[1][1])
-        # --- 1. Crop Target Player ---
-        frame_h, frame_w = frame.shape[:2]
-        pad_x1 = max(0, x1 - self.crop_padding)
-        pad_y1 = max(0, y1 - self.crop_padding)
-        pad_x2 = min(frame_w, x2 + self.crop_padding)
-        pad_y2 = min(frame_h, y2 + self.crop_padding)
-
-        keypoints_abs = None
-        raw_orientation = "Unknown"
-
-        cropped_image = frame[pad_y1:pad_y2, pad_x1:pad_x2]
-
-        # --- 2. Run Pose on Crop ---
-        pose_results_crop = self.pose_model.predict(cropped_image, verbose=False, conf=self.pose_conf_threshold, imgsz=960)
-        # --- 3. Extract Keypoints (Assume first/best detection in crop) ---
-        keypoints_list = pose_results_crop[0].keypoints.data.cpu().numpy()
-        keypoints_rel = keypoints_list[0] # Shape [K, 3] relative to crop
-        
-        # --- Convert keypoints to FULL FRAME coordinates ---
-        keypoints_abs = keypoints_rel.copy()
-        keypoints_abs[:, 0] += pad_x1 # Add crop's top-left x
-        keypoints_abs[:, 1] += pad_y1 # Add crop's top-left y
-
-        # --- 4. Calculate Orientation ---
-        kpts_xy_abs = keypoints_abs[:, :2] # Use absolute coords
-        raw_orientation, shd_vec = self._calculate_single_orientation(cropped_image, keypoints_rel, forward_vector=self.forward_vector, prev_shoulder_vector=shoulder_vector)
+    def process_target_player_solo(self, img: np.ndarray, keypoints_rel: np.ndarray,
+                               shoulder_vector: np.ndarray) -> Optional[Dict[str, Any]]:
+        raw_orientation, shd_vec = self._calculate_single_orientation(img, keypoints_rel, forward_vector=self.forward_vector, prev_shoulder_vector=shoulder_vector)
 
         # --- 5. Smooth Orientation ---
         smoothed_orientation = self._smooth_orientation(raw_orientation)

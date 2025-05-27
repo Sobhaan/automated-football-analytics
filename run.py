@@ -45,6 +45,7 @@ import time
 from output import generate_output_df, update_lists
 from forward_vector import forward_vector
 from auto_id import select_target_player_id_on_first_frame
+from norfair.filter import FilterFactory, OptimizedKalmanFilterFactory
 
 # --- Argument Parsing ---
 parser = argparse.ArgumentParser(description="Soccer Video Analytics with Target Orientation")
@@ -84,7 +85,7 @@ parser.add_argument(
 
 parser.add_argument( 
     "--output", 
-    default="output/realtest.mp4", # Default output name
+    default="output/realtest2222.mp4", # Default output name
     type=str, 
     help="Path for output video file"
 )
@@ -172,11 +173,17 @@ player_tracker = Tracker(
     initialization_delay=2,         
     hit_counter_max=hit_max, # From args           
 )
-ball_tracker = Tracker( 
-    distance_function="iou", 
-    distance_threshold=150,  # Keep fixed or make arg
-    initialization_delay=0,   
-    hit_counter_max=100,       
+
+ball_tracker = Tracker(
+    distance_function="euclidean",
+    distance_threshold=60,  # Reasonable for 1920x1080 video
+    initialization_delay=0,  # Keep at 0 for immediate tracking
+    hit_counter_max=200,  # About 6-7 seconds at 30 FPS
+    pointwise_hit_counter_max=10,  # Helps with partial detections
+    filter_factory=OptimizedKalmanFilterFactory(
+        Q=0.05,  # Lower = trusts motion model more
+        R=0.5    # Higher = less trust in measurements
+    )
 )
 
 motion_estimator = MotionEstimator()
@@ -372,7 +379,6 @@ try:
         
         
         if visualize:
-            start_time = time.time()
             # 8. Draw Visualizations
             frame_final = frame_np # Default to original frame if drawing fails
             # Convert frame BGR NumPy to RGB PIL Image if Draw utils require it
@@ -432,8 +438,6 @@ try:
             # 9. Write Frame using Norfair's Video object
             # This assumes Norfair handles potential errors internally
             video.write(frame_final) 
-            end_time = time.time()
-            print(f"Time taken for drawing: {end_time - start_time:.2f} seconds")
 
         # Print progress occasionally
         if (i + 1) % 100 == 0:

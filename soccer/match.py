@@ -46,6 +46,8 @@ class Match:
         self.detector = model_zoo.get_model('yolo3_mobilenet1.0_coco', pretrained=True)
         self.pose_net = model_zoo.get_model('simple_pose_resnet152_v1d', pretrained=True, ctx=mx.gpu(0))
         self.detector.reset_class(["person"], reuse_weights=['person'])
+        self.keypoints = [[]]
+        self.img = None
         
         self.shoulder_vec = [0,0]
         # Amount of consecutive frames new team has to have the ball in order to change possession
@@ -136,14 +138,13 @@ class Match:
             if player.detection.data["id"] == target:
                 # try:
                     print("Player ID: ", player.detection.data["id"])
-                    target_orientation_data = estimator.process_target_player_solo(frame_np, player, self.shoulder_vec)
+                    keypoints, img = keypoints_pose_solo(frame_np, player, self.detector, self.pose_net)
+                    self.keypoints = keypoints
+                    self.img = img
+                    target_orientation_data = estimator.process_target_player_solo(img, keypoints, self.shoulder_vec)
                     print(dict(islice(target_orientation_data.items(), 2)))
                     player.body_orientation = target_orientation_data["orientation_smooth"]
                     self.shoulder_vec = target_orientation_data["shoulder_vector"]
-
-                # except Exception as e:
-                #     print(f"Error processing body orientation: {e}")
-                #     player.body_orientation = "Unknown"
 
     def update_scanning(self, players: List[Player], target: int = 0, frame_np: np.ndarray = None, scan_angles_lists: List[float] = None):
         """
@@ -157,8 +158,7 @@ class Match:
         
         for player in players:
             if player.detection.data["id"] == target:
-                keypoints = keypoints_pose_solo(frame_np, player, self.detector, self.pose_net)
-                yaw, pitch, roll = estimate_head_pose_angles(keypoints, conf_threshold=0.1)
+                yaw, pitch, roll = estimate_head_pose_angles(self.keypoints, conf_threshold=0.1)
                 if pd.isna(yaw) or pd.isna(pitch) or pd.isna(roll):
                     yaw, pitch, roll = scan_angles_lists[-1]
                 player.scanning = yaw, pitch, roll
@@ -167,7 +167,7 @@ class Match:
     def angles_to_count(angles_lists, initiation_frame, fps):
         relevant_angles = angles_lists[:initiation_frame]
         print(angles_lists)
-        in_advance = 3 * fps
+        in_advance = 5 * fps
         if in_advance > len(relevant_angles):
             in_advance = angles_lists
         print(in_advance)

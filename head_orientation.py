@@ -270,7 +270,7 @@ def keypoints_pose_solo(image, player, detector, pose_net, visualisation=False):
     
     # Stack
     kpts = np.concatenate([coords, confs[:, None]], axis=1)
-    # img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     # h, w = img.shape[:2]
     # print(kpts)
     # for idx, kp in enumerate(kpts):
@@ -292,7 +292,7 @@ def keypoints_pose_solo(image, player, detector, pose_net, visualisation=False):
     # cv2.imshow('Keypoints', img)
     # cv2.waitKey(0)
     # cv2.destroyAllWindows()
-    return kpts
+    return kpts, img
 
 def calculate_angular_difference(angle1, angle2):
     """
