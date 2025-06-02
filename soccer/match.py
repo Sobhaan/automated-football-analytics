@@ -17,6 +17,7 @@ import math
 from itertools import islice
 from gluoncv import model_zoo, data, utils
 import mxnet as mx
+from collections import deque, Counter
 
 
 
@@ -43,7 +44,7 @@ class Match:
         self.possession_counter = 0
         self.closest_player = None
         self.ball = None
-        self.detector = model_zoo.get_model('yolo3_mobilenet1.0_coco', pretrained=True)
+        self.detector = model_zoo.get_model('yolo3_mobilenet1.0_coco', pretrained=True, ctx=mx.gpu(0))
         self.pose_net = model_zoo.get_model('simple_pose_resnet152_v1d', pretrained=True, ctx=mx.gpu(0))
         self.detector.reset_class(["person"], reuse_weights=['person'])
         self.keypoints = [[]]
@@ -57,9 +58,10 @@ class Match:
         self.fps = fps
         # Pass detection
         self.pass_event = PassEvent()
+        self.smooth_scan: deque = deque(maxlen=5)
 
-    def update(self, players: List[Player], ball: Ball, frame_idx: int, body_orientation: bool, scanning: bool, pressure: bool, frame_np: np.ndarray = None, 
-               scan_angles_lists: List[float] = None, target_id: int = 0, estimator: BodyOrientationEstimator = None):
+    def update(self, players: List[Player], ball: Ball, frame_idx: int, scanning: List, frame_np: np.ndarray = None, 
+                target_id: int = 0, estimator: BodyOrientationEstimator = None):
         """
 
         Update match possession and closest player
@@ -71,18 +73,15 @@ class Match:
         ball : Ball
             Ball
         """
-        if pressure:
-            self.update_pressure(
-                players=players)
+        self.update_pressure(
+            players=players)
         
-        if body_orientation:
-            self.update_body_orientation(
-                players=players, frame_np=frame_np, target=target_id, estimator=estimator)
+        self.update_body_orientation(
+            players=players, frame_np=frame_np, target=target_id, estimator=estimator)
 
-        if scanning:
-            self.update_scanning(
-                players=players, frame_np=frame_np, target=target_id, scan_angles_lists=scan_angles_lists
-            )
+        self.update_scanning(
+            players=players, frame_np=frame_np, target=target_id, scan_angles_lists=scanning
+        )
         
         self.update_possession()
             
@@ -139,9 +138,13 @@ class Match:
                 # try:
                     print("Player ID: ", player.detection.data["id"])
                     keypoints, img = keypoints_pose_solo(frame_np, player, self.detector, self.pose_net)
-                    self.keypoints = keypoints
-                    self.img = img
-                    target_orientation_data = estimator.process_target_player_solo(img, keypoints, self.shoulder_vec)
+                    confidence_scores = [kpt[2] for kpt in keypoints]
+                    print("conf", np.average(np.array(confidence_scores[:5])))
+                    print("conf",np.average(np.array(confidence_scores)))
+                    if np.average(np.array(confidence_scores[:5])) > 0.3:
+                        self.keypoints = keypoints
+                        self.img = img
+                    target_orientation_data = estimator.process_target_player_solo(self.img, self.keypoints, self.shoulder_vec)
                     print(dict(islice(target_orientation_data.items(), 2)))
                     player.body_orientation = target_orientation_data["orientation_smooth"]
                     self.shoulder_vec = target_orientation_data["shoulder_vector"]
@@ -158,9 +161,12 @@ class Match:
         
         for player in players:
             if player.detection.data["id"] == target:
-                yaw, pitch, roll = estimate_head_pose_angles(self.keypoints, conf_threshold=0.1)
-                if pd.isna(yaw) or pd.isna(pitch) or pd.isna(roll):
-                    yaw, pitch, roll = scan_angles_lists[-1]
+                yaw, pitch, roll, smooth_list = estimate_head_pose_angles(self.keypoints, conf_threshold=0.1, scan_angles_lists=self.smooth_scan)
+                self.smooth_scan = smooth_list
+                if pd.isna(yaw) or yaw is None:
+                    yaw, pitch, roll = 0,0,0
+                    if len(scan_angles_lists) > 0:
+                        yaw, pitch, roll = scan_angles_lists[-1]
                 player.scanning = yaw, pitch, roll
 
     @staticmethod
@@ -172,7 +178,7 @@ class Match:
             in_advance = angles_lists
         print(in_advance)
         print(len(angles_lists))
-        relevant_angles = relevant_angles[:-int(in_advance)]
+        relevant_angles = relevant_angles[-int(in_advance):]
         print(relevant_angles)
         number_of_scans = count_scans(relevant_angles, fps)
         print(f"Number of scans: {number_of_scans}")
@@ -197,11 +203,11 @@ class Match:
                 for opponent in players:
                     if player.team != opponent.team:
                         distance = player.distance_to_player(opponent)
-                        if distance < 50 :
+                        if distance < 75 :
                             player.pressure = "High Pressure"
-                        elif distance < 150 and player.pressure != "High Pressure":
+                        elif distance < 175 and player.pressure != "High Pressure":
                             player.pressure = "Medium Pressure"
-                        elif distance < 300 and player.pressure != "Medium Pressure" and player.pressure != "High Pressure":
+                        elif distance < 325 and player.pressure != "Medium Pressure" and player.pressure != "High Pressure":
                             player.pressure = "Low Pressure"
                         elif player.pressure != "Low Pressure" and player.pressure != "Medium Pressure" and player.pressure != "High Pressure":
                             player.pressure = "No Pressure"                    

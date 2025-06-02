@@ -12,31 +12,14 @@ import numpy as np
 from gluoncv.data.transforms.presets.ssd import transform_test
 import time
 import os
+from collections import deque, Counter
 
-def estimate_head_pose_angles(kps, conf_threshold=0.1):
+def estimate_head_pose_angles(kps, conf_threshold=0.1, scan_angles_lists=None):
     """
-    Estimates head pose angles from a single frame's keypoints with improved calculations.
-    
-    Args:
-        kps (numpy.ndarray): Keypoint array of shape (17, 3) where each row is [x, y, confidence].
-                            Expected keypoint order (COCO format):
-                            0: Nose
-                            1: Left Eye
-                            2: Right Eye
-                            3: Left Ear
-                            4: Right Ear
-                            5: Left Shoulder
-                            6: Right Shoulder
-                            ... (remaining body keypoints)
-        conf_threshold (float): Minimum confidence threshold for using a keypoint.
-    
-    Returns:
-        tuple: (yaw, pitch, roll) in degrees, or (np.nan, np.nan, np.nan) if estimation fails.
+    Enhanced version of your head pose estimation with better yaw calculation.
+    This replaces your current estimate_head_pose_angles function.
     """
-    # Initialize with failure values
-    yaw, pitch, roll = np.nan, np.nan, np.nan
-    
-    # Keypoint indices for clarity
+    # Keypoint indices (same as your original)
     NOSE = 0
     L_EYE = 1
     R_EYE = 2
@@ -44,192 +27,228 @@ def estimate_head_pose_angles(kps, conf_threshold=0.1):
     R_EAR = 4
     L_SHOULDER = 5
     R_SHOULDER = 6
+    # Initialize with failure values
+    yaw, pitch, roll = np.nan, np.nan, np.nan
     
-    # Validate input
     if kps is None or len(kps) < 7:
         return yaw, pitch, roll
     
-    # Helper function to check if a keypoint is valid
+    # Helper functions
     def is_valid(idx):
         return idx < len(kps) and kps[idx, 2] >= conf_threshold
     
-    # Extract 2D positions for valid keypoints
     def get_point(idx):
         return kps[idx, :2]
     
-    # --- Frontal View Estimation (most reliable) ---
-    if is_valid(NOSE) and is_valid(L_EYE) and is_valid(R_EYE):
+    # Calculate visibility scores to determine view type
+    frontal_score = sum([
+        is_valid(NOSE) * 2,
+        is_valid(L_EYE),
+        is_valid(R_EYE),
+    ]) / 4.0
+    
+    left_profile_score = sum([
+        is_valid(L_EAR) * 2,
+        is_valid(L_EYE),
+        not is_valid(R_EYE),
+        not is_valid(R_EAR),
+    ]) / 5.0
+    
+    right_profile_score = sum([
+        is_valid(R_EAR) * 2,
+        is_valid(R_EYE),
+        not is_valid(L_EYE),
+        not is_valid(L_EAR),
+    ]) / 5.0
+    
+    back_score = sum([
+        is_valid(L_EAR),
+        is_valid(R_EAR),
+        not is_valid(L_EYE),
+        not is_valid(R_EYE),
+        not is_valid(NOSE),
+    ]) / 5.0
+    
+    # Determine primary view
+    view_scores = {
+        'frontal': frontal_score,
+        'left_profile': left_profile_score,
+        'right_profile': right_profile_score,
+        'back': back_score
+    }
+    primary_view = max(view_scores, key=view_scores.get)
+    left_ear, right_ear = kps[3,2], kps[4,2]
+    if left_ear < 0.7 or right_ear < 0.7:
+        if left_ear > right_ear:
+            primary_view = 'left_profile'
+        else:
+            primary_view = 'right_profile'
+    print(primary_view)
+
+    # Estimate based on primary view with enhanced calculations
+    if primary_view == 'frontal' and is_valid(NOSE) and is_valid(L_EYE) and is_valid(R_EYE):
         nose = get_point(NOSE)
         l_eye = get_point(L_EYE)
         r_eye = get_point(R_EYE)
         
-        # Calculate eye center and inter-eye distance
         eye_center = (l_eye + r_eye) / 2.0
         eye_vector = r_eye - l_eye
         eye_distance = np.linalg.norm(eye_vector)
         
-        if eye_distance > 1e-6:  # Avoid division by zero
-            # Roll: angle of the eye line from horizontal
+        if eye_distance > 1e-6:
+            # Roll calculation (unchanged)
             roll = math.degrees(math.atan2(eye_vector[1], eye_vector[0]))
-            # Normalize roll to [-90, 90] range
             if roll > 90:
                 roll -= 180
             elif roll < -90:
                 roll += 180
             
-            # Vector from eye center to nose
+            # Enhanced yaw calculation
             eye_to_nose = nose - eye_center
-            
-            # Pitch estimation with improved calculation
-            # Account for typical facial proportions where nose is below eyes
-            vertical_ratio = eye_to_nose[1] / eye_distance
-            # In neutral pose, nose is typically 0.3-0.5 eye distances below eye line
-            # Adjust for this baseline offset
-            adjusted_pitch_ratio = (vertical_ratio - 0.4) * 2.0
-            adjusted_pitch_ratio = np.clip(adjusted_pitch_ratio, -1.0, 1.0)
-            # Scale down slightly as faces don't tilt as extremely as the math suggests
-            pitch = -math.degrees(math.asin(adjusted_pitch_ratio)) * 0.7
-            
-            # Yaw estimation with improved scaling
             horizontal_ratio = eye_to_nose[0] / eye_distance
             horizontal_ratio = np.clip(horizontal_ratio, -1.0, 1.0)
-            # The original formula underestimates yaw, so we scale it up
-            # This factor was determined empirically to match typical head turn angles
-            yaw = math.degrees(math.asin(horizontal_ratio)) * 1.5
             
-            # Confidence-based yaw refinement
-            # When the head turns, the farther eye often has lower detection confidence
+            # Multi-method yaw estimation
+            yaw_estimates = []
+            weights = []
+            
+            # Method 1: Nose offset with non-linear mapping
+            if abs(horizontal_ratio) < 0.3:
+                nose_yaw = math.degrees(math.asin(horizontal_ratio)) * 1.2
+            else:
+                sign = np.sign(horizontal_ratio)
+                abs_ratio = abs(horizontal_ratio)
+                nose_yaw = sign * (30 * abs_ratio + 40 * abs_ratio**2 + 20 * abs_ratio**3)
+            yaw_estimates.append(nose_yaw)
+            weights.append(2.0)
+            
+            # Method 2: Eye confidence asymmetry
             eye_conf_diff = kps[R_EYE, 2] - kps[L_EYE, 2]
-            # Scale the adjustment based on how frontal the face is
-            # (less adjustment when face is more turned)
-            conf_adjustment = eye_conf_diff * 25.0 * (1.0 - abs(horizontal_ratio))
-            yaw += conf_adjustment
+            if abs(eye_conf_diff) > 0.05:  # Lower threshold for head pose
+                conf_adjustment = eye_conf_diff * 30.0 * (1.0 - abs(horizontal_ratio))
+                yaw_estimates.append(nose_yaw + conf_adjustment)
+                weights.append(1.0)
+            
+            # Method 3: Eye-ear visibility for refinement
+            if is_valid(L_EAR) and is_valid(R_EAR):
+                # When both ears visible in frontal, person is quite frontal
+                ear_visibility_yaw = nose_yaw * 0.8  # Reduce extreme angles
+                yaw_estimates.append(ear_visibility_yaw)
+                weights.append(0.5)
+            elif is_valid(L_EAR) and not is_valid(R_EAR):
+                # Left ear visible, turning right
+                yaw_estimates.append(abs(nose_yaw) * 1.2 if nose_yaw < 0 else nose_yaw)
+                weights.append(0.8)
+            elif is_valid(R_EAR) and not is_valid(L_EAR):
+                # Right ear visible, turning left
+                yaw_estimates.append(-abs(nose_yaw) * 1.2 if nose_yaw > 0 else nose_yaw)
+                weights.append(0.8)
+            
+            # Combine estimates
+            yaw = np.average(yaw_estimates, weights=weights)
+            
+            # Pitch calculation (refined)
+            vertical_ratio = eye_to_nose[1] / eye_distance
+            adjusted_pitch_ratio = (vertical_ratio - 0.4) * 1.8
+            adjusted_pitch_ratio = np.clip(adjusted_pitch_ratio, -1.0, 1.0)
+            pitch = -math.degrees(math.asin(adjusted_pitch_ratio)) * 0.8
     
-    # --- Back View Estimation ---
-    elif is_valid(L_EAR) and is_valid(R_EAR) and not is_valid(L_EYE) and not is_valid(R_EYE):
-        # Person is facing away from camera
-        l_ear = get_point(L_EAR)
-        r_ear = get_point(R_EAR)
-        
-        # Use ear confidence difference to estimate slight head turns
-        ear_conf_diff = kps[R_EAR, 2] - kps[L_EAR, 2]
-        # Base yaw is 180° (facing away) with adjustment based on which ear is clearer
-        yaw = 180.0 + ear_conf_diff * 30.0
-        
-        # Roll from ear positions
-        ear_vector = r_ear - l_ear
-        if np.linalg.norm(ear_vector) > 1e-6:
-            roll = math.degrees(math.atan2(ear_vector[1], ear_vector[0]))
-            if roll > 90:
-                roll -= 180
-            elif roll < -90:
-                roll += 180
-        else:
-            roll = 0.0
-        
-        # Pitch is very difficult to estimate from back view
-        pitch = 0.0
-    
-    # --- Left Profile Estimation ---
-    elif is_valid(L_EAR) and not is_valid(R_EAR) and not is_valid(R_EYE):
-        # Person is looking to their right (left side visible to camera)
-        yaw = -90.0  # Base angle for left profile
-        
-        # Try to refine using eye position if available
-        if is_valid(L_EYE):
+    elif primary_view == 'left_profile':
+        yaw = -90.0
+        if is_valid(L_EAR) and is_valid(L_EYE):
             l_ear = get_point(L_EAR)
             l_eye = get_point(L_EYE)
             ear_eye_vec = l_eye - l_ear
-            
-            # Horizontal component indicates how much they're turned toward/away from camera
             if np.linalg.norm(ear_eye_vec) > 1e-6:
-                # If eye is forward of ear, person is turning slightly toward camera
                 horizontal_offset = ear_eye_vec[0]
-                yaw += horizontal_offset * 0.3  # Scale factor for adjustment
-                
-                # Roll from ear-eye angle
-                roll = math.degrees(math.atan2(ear_eye_vec[1], ear_eye_vec[0]))
-            else:
-                roll = 0.0
-        else:
-            roll = 0.0
-        
-        pitch = 0.0  # Hard to estimate from profile
+                yaw = -90.0 + horizontal_offset * 0.5
+                yaw = np.clip(yaw, -135.0, -45.0)
+        roll = estimate_roll_from_available_points(kps, conf_threshold)
+        pitch = 0.0
     
-    # --- Right Profile Estimation ---
-    elif is_valid(R_EAR) and not is_valid(L_EAR) and not is_valid(L_EYE):
-        # Person is looking to their left (right side visible to camera)
-        yaw = 90.0  # Base angle for right profile
-        
-        # Try to refine using eye position if available
-        if is_valid(R_EYE):
+    elif primary_view == 'right_profile':
+        yaw = 90.0
+        if is_valid(R_EAR) and is_valid(R_EYE):
             r_ear = get_point(R_EAR)
             r_eye = get_point(R_EYE)
             ear_eye_vec = r_eye - r_ear
-            
-            # Horizontal component indicates how much they're turned toward/away from camera
             if np.linalg.norm(ear_eye_vec) > 1e-6:
-                # If eye is forward of ear, person is turning slightly toward camera
-                horizontal_offset = -ear_eye_vec[0]  # Negative because we're on right side
-                yaw += horizontal_offset * 0.3  # Scale factor for adjustment
-                
-                # Roll from ear-eye angle (adjusted for right side)
-                roll = math.degrees(math.atan2(ear_eye_vec[1], ear_eye_vec[0])) - 180.0
-                if roll < -90:
-                    roll += 180
-            else:
-                roll = 0.0
-        else:
-            roll = 0.0
-        
-        pitch = 0.0  # Hard to estimate from profile
+                horizontal_offset = -ear_eye_vec[0]
+                yaw = 90.0 + horizontal_offset * 0.5
+                yaw = np.clip(yaw, 45.0, 135.0)
+        roll = estimate_roll_from_available_points(kps, conf_threshold)
+        pitch = 0.0
     
-    # --- Transitional/Partial View ---
-    elif is_valid(L_EAR) and is_valid(R_EAR):
-        # Both ears visible but maybe only one eye - person is partially turned
-        l_eye_valid = is_valid(L_EYE)
-        r_eye_valid = is_valid(R_EYE)
-        
-        if l_eye_valid and r_eye_valid:
-            # Actually a frontal view - recursively call frontal logic
-            # (In practice, this case should have been caught by the first condition)
-            yaw = 0.0  # Approximate as frontal
-        elif l_eye_valid and not r_eye_valid:
-            # Turning right (left eye visible, right eye not)
-            yaw = -45.0  # Between frontal and left profile
-        elif r_eye_valid and not l_eye_valid:
-            # Turning left (right eye visible, left eye not)
-            yaw = 45.0  # Between frontal and right profile
-        else:
-            # No eyes visible but both ears - closer to back view
-            # Use ear confidences to estimate direction
+    elif primary_view == 'back':
+        yaw = 180.0
+        if is_valid(L_EAR) and is_valid(R_EAR):
             ear_conf_diff = kps[R_EAR, 2] - kps[L_EAR, 2]
-            yaw = 135.0 + ear_conf_diff * 45.0  # Range from ~90 to ~180
-        
-        # Roll from ear positions
-        l_ear = get_point(L_EAR)
-        r_ear = get_point(R_EAR)
-        ear_vector = r_ear - l_ear
-        if np.linalg.norm(ear_vector) > 1e-6:
-            roll = math.degrees(math.atan2(ear_vector[1], ear_vector[0]))
-            if roll > 90:
-                roll -= 180
-            elif roll < -90:
-                roll += 180
-        else:
-            roll = 0.0
-        
-        pitch = 0.0  # Difficult to estimate in transition
+            yaw = 180.0 + ear_conf_diff * 20.0
+        roll = estimate_roll_from_available_points(kps, conf_threshold)
+        pitch = 0.0
     
-    # Clamp all values to reasonable ranges
+    else:
+        # Transitional view - interpolate
+        yaw = interpolate_yaw_from_visibility(view_scores)
+        roll = estimate_roll_from_available_points(kps, conf_threshold)
+        pitch = 0.0
+    
+    # Clamp values
     if not np.isnan(yaw):
         yaw = np.clip(yaw, -180.0, 180.0)
         pitch = np.clip(pitch, -90.0, 90.0)
         roll = np.clip(roll, -90.0, 90.0)
-    return yaw, pitch, roll
+
+    print("previous yaw: ", yaw)
+    yaw, pitch, roll, smooth_list = smooth_scanning([yaw, pitch, roll], scan_angles_lists)
+    print("new yaw: ", yaw)
+    return yaw, pitch, roll, smooth_list
+
+def estimate_roll_from_available_points(kps, conf_threshold):
+    """Helper function to estimate roll from any available horizontal point pairs."""
+    PAIRS = [(1, 2), (3, 4), (5, 6)]  # Eyes, Ears, Shoulders
+    
+    for left_idx, right_idx in PAIRS:
+        if (left_idx < len(kps) and right_idx < len(kps) and
+            kps[left_idx, 2] >= conf_threshold and kps[right_idx, 2] >= conf_threshold):
+            
+            left_point = kps[left_idx, :2]
+            right_point = kps[right_idx, :2]
+            vector = right_point - left_point
+            
+            if np.linalg.norm(vector) > 1e-6:
+                roll = math.degrees(math.atan2(vector[1], vector[0]))
+                if roll > 90:
+                    roll -= 180
+                elif roll < -90:
+                    roll += 180
+                return roll
+    return 0.0
+
+def interpolate_yaw_from_visibility(view_scores):
+    """Smoothly interpolate yaw based on visibility scores."""
+    yaw_values = {
+        'frontal': 0.0,
+        'left_profile': -90.0,
+        'right_profile': 90.0,
+        'back': 180.0
+    }
+    
+    weighted_sum = 0.0
+    weight_total = 0.0
+    
+    for view, score in view_scores.items():
+        if score > 0.1:
+            weighted_sum += yaw_values[view] * score
+            weight_total += score
+    
+    if weight_total > 0:
+        return weighted_sum / weight_total
+    return 0.0
 
     
 def keypoints_pose_solo(image, player, detector, pose_net, visualisation=False):
+    start_tim2e = time.time()
     # Extract bbox
     x1 = int(player.detection.points[0][0])
     y1 = int(player.detection.points[0][1])
@@ -246,7 +265,8 @@ def keypoints_pose_solo(image, player, detector, pose_net, visualisation=False):
     image_cropped = image[pad_y1:pad_y2, pad_x1:pad_x2]
     
     cv_img_rgb = cv2.cvtColor(image_cropped, cv2.COLOR_BGR2RGB)
-    mx_img = mx.nd.array(cv_img_rgb, dtype='uint8')
+    with mx.Context(mx.gpu(0)):
+        mx_img = mx.nd.array(cv_img_rgb, dtype='uint8')
     
     # Transform for detection
     x, img = transform_test([mx_img], short=512)
@@ -258,7 +278,9 @@ def keypoints_pose_solo(image, player, detector, pose_net, visualisation=False):
     pose_input, upscale_bbox = detector_to_simple_pose(img, class_IDs, scores, bounding_boxs, thr=0.1, ctx=mx.gpu())
     end_time = time.time()
     print(f"Pose input preparation time: {end_time - start_time:.2f} seconds")
-    
+    if pose_input is None:
+        kpts = np.array([[0 for i in range(3)] for i in range(12)])
+        return kpts, img
     # Run pose model
     predicted_heatmap = pose_net(pose_input)
     
@@ -271,11 +293,14 @@ def keypoints_pose_solo(image, player, detector, pose_net, visualisation=False):
     # Stack
     kpts = np.concatenate([coords, confs[:, None]], axis=1)
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    end_time = time.time()
+    print(f"Keypoint extraction took {end_time - start_tim2e:.4f} seconds")
     # h, w = img.shape[:2]
+    # print(h,w)
     # print(kpts)
     # for idx, kp in enumerate(kpts):
     # # Convert relative coordinates to absolute
-    #     if idx < 5:
+    #     # if idx < 5:
     #         x_rel, y_rel, conf = kp
 
     #         # Draw the keypoint
@@ -313,84 +338,160 @@ def calculate_angular_difference(angle1, angle2):
         diff += 360
     return diff
 
-def count_scans(yaw_angles, 
-                fps=30, 
-                min_angular_velocity=90,  # degrees per second
-                min_scan_angle=45,        # minimum total angle for a scan
-                max_scan_duration=1.0):   # maximum duration of a scan in seconds
-    """
-    Count the number of scans in a sequence of yaw angles.
-    
-    Args:
-        yaw_angles: List or array of yaw values (degrees) for each frame
-        fps: Frames per second of the data
-        min_angular_velocity: Minimum angular velocity (deg/s) to consider as scanning
-        min_scan_angle: Minimum total angular displacement for a valid scan
-        max_scan_duration: Maximum time (seconds) for a single scan motion
-        
-    Returns:
-        int: Number of scans detected
-    """
-    
-    # Convert to numpy array for easier manipulation
-    yaw_angles = [x[0] for x in yaw_angles]
-    yaw = np.array(yaw_angles)
-    
+def count_scans(yaw_angles,
+                      fps=30,
+                      min_angular_velocity=45,
+                      min_scan_angle=100,
+                      max_scan_duration=1.0):
 
-    # Calculate angular velocity for each frame
+    print(f"\n--- Running count_scans_debug ---")
+    print(f"Parameters: fps={fps}, min_angular_velocity={min_angular_velocity}, "
+          f"min_scan_angle={min_scan_angle}, max_scan_duration={max_scan_duration}")
+
+    # 1. Initial Data Preparation
+    original_yaw_angles_for_debug = yaw_angles # Keep a reference if needed for deep debug
+    yaw_angles_processed = [x[0] for x in yaw_angles]
+    yaw = np.array(yaw_angles_processed)
+    print(f"[DEBUG] Number of frames (yaw angles): {len(yaw)}")
+    if len(yaw) < 2:
+        print("[DEBUG] Not enough frames to calculate velocity. Returning 0 scans.")
+        return 0, []
+
+    # 2. Calculating Angular Velocity
     angular_velocity = np.zeros(len(yaw))
-    
     for i in range(1, len(yaw)):
-        # Calculate angular difference accounting for wrap-around
         angle_diff = calculate_angular_difference(yaw[i-1], yaw[i])
-        # Convert to angular velocity (degrees per second)
         angular_velocity[i] = angle_diff * fps
-    
-    # Smooth the angular velocity to reduce noise
-    # Using a simple moving average with window size of 3
+    # print(f"[DEBUG] Raw Angular Velocity (sample): {angular_velocity[:10]}") # Optional: print sample
+
+    # 3. Smoothing Angular Velocity
     window_size = 3
-    angular_velocity_smooth = np.convolve(angular_velocity, 
-                                         np.ones(window_size)/window_size, 
-                                         mode='same')
-    
-    # Find frames where angular velocity exceeds our threshold
-    # These are potential scanning movements
-    high_velocity_frames = np.where(np.abs(angular_velocity_smooth) > min_angular_velocity)[0]
-    
+    if len(angular_velocity) < window_size:
+        angular_velocity_smooth = angular_velocity
+        print(f"[DEBUG] Angular velocity array too short for smoothing window {window_size}, using raw.")
+    else:
+        angular_velocity_smooth = np.convolve(angular_velocity,
+                                              np.ones(window_size)/window_size,
+                                              mode='same')
+    # print(f"[DEBUG] Smoothed Angular Velocity (sample): {angular_velocity_smooth[:10]}") # Optional: print sample
+    # print(f"[DEBUG] All Smoothed Angular Velocities: {angular_velocity_smooth}") # Can be very verbose
+
+    # 4. Identifying High-Velocity Frames
+    abs_smoothed_velocity = np.abs(angular_velocity_smooth)
+    high_velocity_frames = np.where(abs_smoothed_velocity > min_angular_velocity)[0]
+    print(f"[DEBUG] Threshold for high velocity: > {min_angular_velocity} deg/s")
+    # For each frame, print its smoothed velocity and if it's a high-velocity frame
+    # This can be verbose but very useful:
+    # for i_frame, vel in enumerate(abs_smoothed_velocity):
+    #     is_high_vel = i_frame in high_velocity_frames
+    #     print(f"[DEBUG] Frame {i_frame}: Abs Smoothed Vel = {vel:.2f} deg/s. IsHighVel: {is_high_vel}")
+
+    print(f"[DEBUG] Indices of High-Velocity Frames: {high_velocity_frames}")
+    print(f"[DEBUG] Count of High-Velocity Frames: {len(high_velocity_frames)}")
+
     if len(high_velocity_frames) == 0:
-        return 0
-    
-    # Group consecutive high-velocity frames into scan events
+        print("[DEBUG] No high-velocity frames found. Returning 0 scans.")
+        return 0, []
+
+    # 5. Grouping and Validating Scans
     scan_count = 0
+    detected_scan_frames_list = []
     i = 0
-    
     while i < len(high_velocity_frames):
-        # Start of a potential scan
         scan_start_idx = high_velocity_frames[i]
         scan_end_idx = scan_start_idx
-        
-        # Find all consecutive frames that belong to this scan
+        print(f"\n[DEBUG] Loop i={i}: Potential scan starting with frame {scan_start_idx} (from high_velocity_frames index {i})")
+
+        # Try to extend this scan
         j = i + 1
         while j < len(high_velocity_frames):
-            # Check if this frame is close enough to be part of the same scan
-            if (high_velocity_frames[j] - high_velocity_frames[j-1] <= 3 and  # Allow small gaps
-                (high_velocity_frames[j] - scan_start_idx) / fps <= max_scan_duration):
-                scan_end_idx = high_velocity_frames[j]
+            current_hv_frame = high_velocity_frames[j]
+            prev_hv_frame = high_velocity_frames[j-1]
+            print(f"[DEBUG]   Loop j={j}: Checking if high-velocity frame {current_hv_frame} extends the scan.")
+
+            # Condition 1: Gap between consecutive high-velocity frames
+            frame_gap = current_hv_frame - prev_hv_frame
+            gap_ok = frame_gap <= 3 # Max 2 non-high-velocity frames in between
+            print(f"[DEBUG]     Frame gap to previous high-vel frame ({prev_hv_frame}): {frame_gap}. (Allowed: <=3). Met: {gap_ok}")
+
+            # Condition 2: Maximum scan duration
+            # Duration is from the start of scan_start_idx to the end of current_hv_frame
+            # Number of frames in duration = current_hv_frame - scan_start_idx + 1
+            # Time = (Number of frames / fps)
+            # Or, more simply, time diff between first and current high-vel frame
+            current_scan_duration_frames = current_hv_frame - scan_start_idx # Number of frame intervals
+            current_scan_duration_seconds = current_scan_duration_frames / fps # Duration in seconds
+            duration_ok = current_scan_duration_seconds <= max_scan_duration
+            print(f"[DEBUG]     Current scan duration (from {scan_start_idx} to {current_hv_frame}): {current_scan_duration_seconds:.2f}s. (Allowed: <= {max_scan_duration}s). Met: {duration_ok}")
+
+            if gap_ok and duration_ok:
+                scan_end_idx = current_hv_frame
+                print(f"[DEBUG]     Extending scan. scan_end_idx now: {scan_end_idx}")
                 j += 1
             else:
+                print(f"[DEBUG]     Stopping scan extension for frame {current_hv_frame}.")
+                if not gap_ok: print(f"[DEBUG]       Reason: Frame gap {frame_gap} > 3.")
+                if not duration_ok: print(f"[DEBUG]       Reason: Scan duration {current_scan_duration_seconds:.2f}s > {max_scan_duration}s.")
                 break
         
-        # Calculate total angular displacement for this potential scan
-        if scan_end_idx > scan_start_idx:
+        print(f"[DEBUG] Potential segment identified: Original Frames {scan_start_idx} to {scan_end_idx}")
+        segment_duration_seconds = (scan_end_idx - scan_start_idx) / fps # Duration based on frame indices
+        print(f"[DEBUG]   Segment duration: {segment_duration_seconds:.2f}s")
+
+        # 6. Validate segment by total angle
+        if scan_end_idx > scan_start_idx: # Ensure the segment has some length
             total_angle = 0
-            for k in range(scan_start_idx, min(scan_end_idx + 1, len(yaw) - 1)):
-                total_angle += abs(calculate_angular_difference(yaw[k], yaw[k+1]))
+            # Summing angular differences for frames from scan_start_idx to scan_end_idx.
+            # This involves yaw values from yaw[scan_start_idx] up to yaw[scan_end_idx+1].
+            print(f"[DEBUG]   Calculating total angle for segment Frames {scan_start_idx}-{scan_end_idx}:")
             
-            # Check if this qualifies as a scan
+            # Iterate through the original yaw values for this segment
+            for k in range(scan_start_idx, scan_end_idx + 1):
+                if k + 1 < len(yaw): # Ensure we don't go out of bounds for yaw[k+1]
+                    diff = calculate_angular_difference(yaw[k], yaw[k+1])
+                    total_angle += abs(diff)
+                    # print(f"[DEBUG]     yaw[{k}]={yaw[k]:.2f}, yaw[{k+1}]={yaw[k+1]:.2f}. Diff={diff:.2f}. AbsDiff={abs(diff):.2f}. Current total_angle={total_angle:.2f}")
+                else:
+                    # This case means scan_end_idx is the last frame of yaw data, so no yaw[k+1]
+                    # The loop structure `range(scan_start_idx, scan_end_idx + 1)` means `k` will go up to `scan_end_idx`.
+                    # The last difference considered is `yaw[scan_end_idx]` and `yaw[scan_end_idx+1]`.
+                    # If `scan_end_idx` is the last frame, this calculation is naturally shorter.
+                    # The total_angle will sum changes up to yaw[scan_end_idx-1] to yaw[scan_end_idx].
+                    pass # No more differences to add if k is the last frame index
+
+            print(f"[DEBUG]   Calculated total_angle for segment: {total_angle:.2f}°")
+            print(f"[DEBUG]   Minimum required scan_angle: {min_scan_angle}°")
+
             if total_angle >= min_scan_angle:
                 scan_count += 1
+                detected_scan_frames_list.append((scan_start_idx, scan_end_idx))
+                print(f"✅ [RESULT] Scan DETECTED & COUNTED: Frames {scan_start_idx} to {scan_end_idx}. Total Angle: {total_angle:.2f}°. Current scan_count: {scan_count}")
+            else:
+                print(f"❌ [RESULT] Segment REJECTED: Frames {scan_start_idx} to {scan_end_idx}. Reason: total_angle ({total_angle:.2f}°) < min_scan_angle ({min_scan_angle}°).")
+        else: # scan_end_idx <= scan_start_idx
+            print(f"❌ [RESULT] Segment REJECTED: Frames {scan_start_idx} to {scan_end_idx}. Reason: Segment too short or not extended (no high-velocity frames after start).")
         
-        # Move to next unprocessed high-velocity frame
-        i = j
-    
+        i = j # Move to the next unprocessed high-velocity frame
+        print(f"[DEBUG] Advancing main loop. Next i will be: {i}")
+
+    print(f"\n--- Debugging Finished ---")
+    print(f"Final scan_count: {scan_count}")
+    print(f"Detected scan frame ranges: {detected_scan_frames_list}")
     return scan_count
+
+def smooth_scanning(current_orientations, yaw_only_smooth) -> str:
+        """Updates history and returns smoothed orientation for the target ID."""
+        yaw_only = current_orientations[0]
+        if yaw_only is not np.nan:
+            yaw_only_smooth.append(yaw_only)
+        if len(yaw_only_smooth) < 5:
+            return current_orientations[0], current_orientations[1], current_orientations[2], yaw_only_smooth # Not enough history yet
+        # Get non-unknown votes from the history window
+        known_orientations = [o for o in yaw_only_smooth if o != 0]
+        if not known_orientations:
+            return 0,0,0, yaw_only_smooth # No known orientations in window
+
+        # Find majority
+        median_yaw = np.median(yaw_only_smooth)
+        smoothed_orientation = median_yaw
+        return smoothed_orientation, current_orientations[1], current_orientations[2], yaw_only_smooth  # Return pitch and roll unchanged

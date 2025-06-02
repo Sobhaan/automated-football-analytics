@@ -85,12 +85,12 @@ parser.add_argument(
 
 parser.add_argument( 
     "--output", 
-    default="output/realtest2222.mp4", # Default output name
+    default="output/bpvutestfullvideo3.mp4", # Default output name
     type=str, 
     help="Path for output video file"
 )
 args = parser.parse_args()
-
+start_time = time.time()
 body_orientation = ast.literal_eval(str(args.body_orientation))
 allplayers = ast.literal_eval(str(args.all_players))
 scanning = ast.literal_eval(str(args.scanning))
@@ -123,7 +123,7 @@ if args.automatic_teams:
     temp_video_reader = cv2.VideoCapture(args.video)
     total_frames = int(temp_video_reader.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    random_frame_indices = sorted(random.sample(range(total_frames), 30))
+    random_frame_indices = sorted(random.sample(range(total_frames), 60))
     initial_frames_for_filters = []
     for frame_index in random_frame_indices:
         temp_video_reader.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
@@ -240,7 +240,6 @@ target_bp = []
 target_pressure = []
 target_turnable = []
 target_number_of_scans = []
-
 # --- MAIN PROCESSING LOOP ---
 print("\nStarting video processing...")
 frame_count = 0
@@ -251,7 +250,7 @@ try:
         print(f"Processing frame {i}...") # Debug print
         print(is_in_reselection_phase)
 
-        if i == 275: break
+        # if i == 100: break
         if wait_frames_countdown > 0:
             print(f"Waiting... {wait_frames_countdown} frames remaining.")
             wait_frames_countdown -= 1
@@ -289,6 +288,7 @@ try:
             else: # New target ID selected
                 id = reselection_result
                 print(f"New Target ID selected: {id}")
+                FORWARD_VECTOR = forward_vector()
                 target_missing_frames_count = 0 # Reset for the new target
                 # Re-initialize BodyOrientationEstimator for the new target
                 estimator = BodyOrientationEstimator(
@@ -359,7 +359,7 @@ try:
         else:
             players = Player.from_detections(detections=player_detections_tracked, teams=teams)
 
-        match.update(players, ball, i, body_orientation, scanning, pressure, frame_np, scan_angles_list, target_id=id, estimator=estimator)
+        match.update(players, ball, i, scan_angles_list, frame_np, target_id=id, estimator=estimator)
         body_position_list, pressure_list, turnable_list, scan_angles_list = update_lists(players, id, body_position_list, pressure_list, turnable_list, scan_angles_list)
         passes_list = match.passes
         if len(passes_list) > len(old_passes):
@@ -457,3 +457,5 @@ finally: # Ensure resources are released
     df.to_csv(args.output.replace(".mp4", ".csv"))
     print("Releasing video resources...")
     print(f"Output video should be saved to {args.output} by Norfair.")
+    end_time = time.time()
+    print(f"Total processing time: {end_time - start_time:.2f} seconds.")

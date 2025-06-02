@@ -18,7 +18,7 @@ def update_lists(players, target_id, body_position, pressure, turnable, number_o
         if player.detection.data['id'] == target_id:
             body_position.append(player.body_orientation)
             pressure.append(player.pressure)
-            if pressure == "High Pressure" and body_position == "Closed":
+            if (pressure == "High Pressure" or pressure == "Medium Pressure") and body_position == "Closed":
                 turnable.append("No")
             else:
                 turnable.append("Yes")
@@ -27,8 +27,8 @@ def update_lists(players, target_id, body_position, pressure, turnable, number_o
             break
 
     if not found:
-        body_position.append("None")
-        pressure.append("None")
-        turnable.append("None")
-        number_of_scans.append("None")
+        body_position.append(body_position[-1])
+        pressure.append(pressure[-1])
+        turnable.append(turnable[-1])
+        number_of_scans.append(number_of_scans[-1])
     return body_position, pressure, turnable, number_of_scans

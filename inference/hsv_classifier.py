@@ -237,23 +237,18 @@ class HSVClassifier(BaseClassifier):
         return cv2.cvtColor(img.copy(), cv2.COLOR_BGR2HSV)
 
     def apply_filter(self, img: np.ndarray, filter: dict) -> np.ndarray:
-        """
-        Apply filter to image
-
-        Parameters
-        ----------
-        img : np.ndarray
-            Image to apply filter to
-        filter : dict
-            Filter to apply
-
-        Returns
-        -------
-        np.ndarray
-            Filtered image
-        """
         img_hsv = self.get_hsv_img(img)
-        mask = cv2.inRange(img_hsv, filter["lower_hsv"], filter["upper_hsv"])
+
+        lower_hsv_val = filter["lower_hsv"]
+        upper_hsv_val = filter["upper_hsv"]
+
+        if lower_hsv_val[0] > upper_hsv_val[0]: # Hue wrap-around case for H
+            mask1 = cv2.inRange(img_hsv, lower_hsv_val, (179, upper_hsv_val[1], upper_hsv_val[2]))
+            mask2 = cv2.inRange(img_hsv, (0, lower_hsv_val[1], lower_hsv_val[2]), upper_hsv_val)
+            mask = cv2.bitwise_or(mask1, mask2)
+        else:
+            mask = cv2.inRange(img_hsv, lower_hsv_val, upper_hsv_val)
+
         return cv2.bitwise_and(img, img, mask=mask)
 
     def crop_img_for_jersey(self, img: np.ndarray) -> np.ndarray:
@@ -274,7 +269,7 @@ class HSVClassifier(BaseClassifier):
 
         y_start = int(height * 0.3)
         y_end = int(height * 0.5)
-        x_start = int(width * 0.4)
+        x_start = int(width * 0.5)
         x_end = int(width * 0.6)
         # plt.figure(figsize=(4,4))
         # # convert BGR → RGB for display
@@ -337,6 +332,12 @@ class HSVClassifier(BaseClassifier):
         transformed_img = self.crop_img_for_jersey(transformed_img)
         transformed_img = self.apply_filter(transformed_img, filter)
         transformed_img = self.add_median_blur(transformed_img)
+        # plt.figure(figsize=(4,4))
+        # # convert BGR → RGB for display
+        # plt.imshow(cv2.cvtColor(transformed_img, cv2.COLOR_BGR2RGB))
+        # plt.axis('off')
+        # plt.show()
+    
         return transformed_img
 
     def add_non_black_pixels_count_in_filter(
@@ -387,9 +388,11 @@ class HSVClassifier(BaseClassifier):
                     filter["non_black_pixels_count"] = 0
                 filter["non_black_pixels_count"] += color["non_black_pixels_count"]
 
+        # print(filters)
         max_non_black_pixels_filter = max(
             filters, key=lambda x: x["non_black_pixels_count"]
         )
+        # print(max_non_black_pixels_filter)
 
         return max_non_black_pixels_filter["name"]
 
