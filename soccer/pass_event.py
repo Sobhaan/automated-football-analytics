@@ -342,39 +342,36 @@ class PassEvent:
                 # --- Valid Pass Detected! ---
                 team = receiver.team # Team performing the pass
                 
-                if team is None or self.ball is None or self.ball.detection is None:
-                    print(f"Frame {self.current_frame_idx}: Error generating pass - Missing team/ball info.")
-                else:
-                    # Estimate pass start/end points (can be refined)
-                    # Start: Passer's foot/center when they were last confirmed?
-                    # For simplicity, let's use passer's last known foot position
-                    start_coord = passer.closest_foot_to_ball_abs(self.ball) # Needs ball state from THAT frame ideally, but use current ball as approximation
-                    if start_coord is None: start_coord = passer.center # Fallback to center
-                    
-                    # End: Ball position now (when receiver confirmed)
-                    end_coord = self.ball.detection.absolute_points 
+                # Estimate pass start/end points (can be refined)
+                # Start: Passer's foot/center when they were last confirmed?
+                # For simplicity, let's use passer's last known foot position
+                start_coord = passer.closest_foot_to_ball_abs(self.ball) # Needs ball state from THAT frame ideally, but use current ball as approximation
+                if start_coord is None: start_coord = passer.center # Fallback to center
+                
+                # End: Ball position now (when receiver confirmed)
+                end_coord = self.ball.detection.absolute_points 
 
-                    # --- Generate the Pass object ---
-                    passer_id = self.last_player_confirmed_possession.detection.data.get("id")
-                    receiver_id = self.current_closest_player.detection.data.get("id")
-                    # Initiation frame = frame passer was last confirmed (best estimate)
-                    initiation_frame = passer_confirmation_frame 
-                    reception_frame = receiver_confirmation_frame
+                # --- Generate the Pass object ---
+                passer_id = self.last_player_confirmed_possession.detection.data.get("id")
+                receiver_id = self.current_closest_player.detection.data.get("id")
+                # Initiation frame = frame passer was last confirmed (best estimate)
+                initiation_frame = passer_confirmation_frame 
+                reception_frame = receiver_confirmation_frame
 
-                    # Assuming Pass class and generate_pass are updated (see step 3 & 4)
-                    new_pass = self.generate_pass(
-                        team=team, 
-                        start_pass=start_coord, 
-                        end_pass=end_coord,
-                        passer_id=passer_id,         
-                        receiver_id=receiver_id,     
-                        initiation_frame=initiation_frame, 
-                        reception_frame=reception_frame 
-                    )
-                    
-                    # Add pass to the team's list
-                    team.passes.append(new_pass)
-                    print(f"Frame {self.current_frame_idx}: Pass Detected! {passer_id} ({passer.team.name}) -> {receiver_id} ({receiver.team.name}). Initiated around frame {initiation_frame}.")
+                # Assuming Pass class and generate_pass are updated (see step 3 & 4)
+                new_pass = self.generate_pass(
+                    team=team, 
+                    start_pass=start_coord, 
+                    end_pass=end_coord,
+                    passer_id=passer_id,         
+                    receiver_id=receiver_id,     
+                    initiation_frame=initiation_frame, 
+                    reception_frame=reception_frame 
+                )
+                
+                # Add pass to the team's list
+                team.passes.append(new_pass)
+                print(f"Frame {self.current_frame_idx}: Pass Detected! {passer_id} ({passer.team.name}) -> {receiver_id} ({receiver.team.name}). Initiated around frame {initiation_frame}.")
 
             # --- Update State for Next Frame ---
             # Regardless of whether a pass happened, the current player is now the last confirmed possessor.

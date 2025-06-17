@@ -83,7 +83,6 @@ def estimate_head_pose_angles(kps, conf_threshold=0.1, scan_angles_lists=None):
             primary_view = 'left_profile'
         else:
             primary_view = 'right_profile'
-    print(primary_view)
 
     # Estimate based on primary view with enhanced calculations
     if primary_view == 'frontal' and is_valid(NOSE) and is_valid(L_EYE) and is_valid(R_EYE):
@@ -199,9 +198,7 @@ def estimate_head_pose_angles(kps, conf_threshold=0.1, scan_angles_lists=None):
         pitch = np.clip(pitch, -90.0, 90.0)
         roll = np.clip(roll, -90.0, 90.0)
 
-    print("previous yaw: ", yaw)
     yaw, pitch, roll, smooth_list = smooth_scanning([yaw, pitch, roll], scan_angles_lists)
-    print("new yaw: ", yaw)
     return yaw, pitch, roll, smooth_list
 
 def estimate_roll_from_available_points(kps, conf_threshold):
@@ -248,7 +245,6 @@ def interpolate_yaw_from_visibility(view_scores):
 
     
 def keypoints_pose_solo(image, player, detector, pose_net, visualisation=False):
-    start_tim2e = time.time()
     # Extract bbox
     x1 = int(player.detection.points[0][0])
     y1 = int(player.detection.points[0][1])
@@ -277,7 +273,6 @@ def keypoints_pose_solo(image, player, detector, pose_net, visualisation=False):
     start_time = time.time()
     pose_input, upscale_bbox = detector_to_simple_pose(img, class_IDs, scores, bounding_boxs, thr=0.1, ctx=mx.gpu())
     end_time = time.time()
-    print(f"Pose input preparation time: {end_time - start_time:.2f} seconds")
     if pose_input is None:
         kpts = np.array([[0 for i in range(3)] for i in range(12)])
         return kpts, img
@@ -286,19 +281,14 @@ def keypoints_pose_solo(image, player, detector, pose_net, visualisation=False):
     
     # Get coordinates
     pred_coords, confidence = heatmap_to_coord(predicted_heatmap, upscale_bbox)
-    end_time = time.time()
     coords = pred_coords[0].asnumpy()
     confs = confidence[0].asnumpy().squeeze(-1)
     
     # Stack
     kpts = np.concatenate([coords, confs[:, None]], axis=1)
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    end_time = time.time()
-    print(f"Keypoint extraction took {end_time - start_tim2e:.4f} seconds")
     if visualisation:
         h, w = img.shape[:2]
-        print(h,w)
-        print(kpts)
         for idx, kp in enumerate(kpts):
         # Convert relative coordinates to absolute
             if idx < 7:
@@ -349,54 +339,29 @@ def count_scans(yaw_angles,
                       min_scan_angle=100,
                       max_scan_duration=1.0):
 
-    print(f"\n--- Running count_scans_debug ---")
-    print(f"Parameters: fps={fps}, min_angular_velocity={min_angular_velocity}, "
-          f"min_scan_angle={min_scan_angle}, max_scan_duration={max_scan_duration}")
-
     # 1. Initial Data Preparation
     original_yaw_angles_for_debug = yaw_angles # Keep a reference if needed for deep debug
     yaw_angles_processed = [x[0] for x in yaw_angles]
     yaw = np.array(yaw_angles_processed)
-    print(f"[DEBUG] Number of frames (yaw angles): {len(yaw)}")
-    if len(yaw) < 2:
-        print("[DEBUG] Not enough frames to calculate velocity. Returning 0 scans.")
-        return 0, []
 
     # 2. Calculating Angular Velocity
     angular_velocity = np.zeros(len(yaw))
     for i in range(1, len(yaw)):
         angle_diff = calculate_angular_difference(yaw[i-1], yaw[i])
         angular_velocity[i] = angle_diff * fps
-    # print(f"[DEBUG] Raw Angular Velocity (sample): {angular_velocity[:10]}") # Optional: print sample
 
     # 3. Smoothing Angular Velocity
     window_size = 3
     if len(angular_velocity) < window_size:
         angular_velocity_smooth = angular_velocity
-        print(f"[DEBUG] Angular velocity array too short for smoothing window {window_size}, using raw.")
     else:
         angular_velocity_smooth = np.convolve(angular_velocity,
                                               np.ones(window_size)/window_size,
                                               mode='same')
-    # print(f"[DEBUG] Smoothed Angular Velocity (sample): {angular_velocity_smooth[:10]}") # Optional: print sample
-    # print(f"[DEBUG] All Smoothed Angular Velocities: {angular_velocity_smooth}") # Can be very verbose
 
     # 4. Identifying High-Velocity Frames
     abs_smoothed_velocity = np.abs(angular_velocity_smooth)
     high_velocity_frames = np.where(abs_smoothed_velocity > min_angular_velocity)[0]
-    print(f"[DEBUG] Threshold for high velocity: > {min_angular_velocity} deg/s")
-    # For each frame, print its smoothed velocity and if it's a high-velocity frame
-    # This can be verbose but very useful:
-    # for i_frame, vel in enumerate(abs_smoothed_velocity):
-    #     is_high_vel = i_frame in high_velocity_frames
-    #     print(f"[DEBUG] Frame {i_frame}: Abs Smoothed Vel = {vel:.2f} deg/s. IsHighVel: {is_high_vel}")
-
-    print(f"[DEBUG] Indices of High-Velocity Frames: {high_velocity_frames}")
-    print(f"[DEBUG] Count of High-Velocity Frames: {len(high_velocity_frames)}")
-
-    if len(high_velocity_frames) == 0:
-        print("[DEBUG] No high-velocity frames found. Returning 0 scans.")
-        return 0, []
 
     # 5. Grouping and Validating Scans
     scan_count = 0
@@ -405,19 +370,16 @@ def count_scans(yaw_angles,
     while i < len(high_velocity_frames):
         scan_start_idx = high_velocity_frames[i]
         scan_end_idx = scan_start_idx
-        print(f"\n[DEBUG] Loop i={i}: Potential scan starting with frame {scan_start_idx} (from high_velocity_frames index {i})")
 
         # Try to extend this scan
         j = i + 1
         while j < len(high_velocity_frames):
             current_hv_frame = high_velocity_frames[j]
             prev_hv_frame = high_velocity_frames[j-1]
-            print(f"[DEBUG]   Loop j={j}: Checking if high-velocity frame {current_hv_frame} extends the scan.")
 
             # Condition 1: Gap between consecutive high-velocity frames
             frame_gap = current_hv_frame - prev_hv_frame
             gap_ok = frame_gap <= 3 # Max 2 non-high-velocity frames in between
-            print(f"[DEBUG]     Frame gap to previous high-vel frame ({prev_hv_frame}): {frame_gap}. (Allowed: <=3). Met: {gap_ok}")
 
             # Condition 2: Maximum scan duration
             # Duration is from the start of scan_start_idx to the end of current_hv_frame
@@ -427,11 +389,9 @@ def count_scans(yaw_angles,
             current_scan_duration_frames = current_hv_frame - scan_start_idx # Number of frame intervals
             current_scan_duration_seconds = current_scan_duration_frames / fps # Duration in seconds
             duration_ok = current_scan_duration_seconds <= max_scan_duration
-            print(f"[DEBUG]     Current scan duration (from {scan_start_idx} to {current_hv_frame}): {current_scan_duration_seconds:.2f}s. (Allowed: <= {max_scan_duration}s). Met: {duration_ok}")
 
             if gap_ok and duration_ok:
                 scan_end_idx = current_hv_frame
-                print(f"[DEBUG]     Extending scan. scan_end_idx now: {scan_end_idx}")
                 j += 1
             else:
                 print(f"[DEBUG]     Stopping scan extension for frame {current_hv_frame}.")
@@ -439,23 +399,19 @@ def count_scans(yaw_angles,
                 if not duration_ok: print(f"[DEBUG]       Reason: Scan duration {current_scan_duration_seconds:.2f}s > {max_scan_duration}s.")
                 break
         
-        print(f"[DEBUG] Potential segment identified: Original Frames {scan_start_idx} to {scan_end_idx}")
         segment_duration_seconds = (scan_end_idx - scan_start_idx) / fps # Duration based on frame indices
-        print(f"[DEBUG]   Segment duration: {segment_duration_seconds:.2f}s")
 
         # 6. Validate segment by total angle
         if scan_end_idx > scan_start_idx: # Ensure the segment has some length
             total_angle = 0
             # Summing angular differences for frames from scan_start_idx to scan_end_idx.
             # This involves yaw values from yaw[scan_start_idx] up to yaw[scan_end_idx+1].
-            print(f"[DEBUG]   Calculating total angle for segment Frames {scan_start_idx}-{scan_end_idx}:")
             
             # Iterate through the original yaw values for this segment
             for k in range(scan_start_idx, scan_end_idx + 1):
                 if k + 1 < len(yaw): # Ensure we don't go out of bounds for yaw[k+1]
                     diff = calculate_angular_difference(yaw[k], yaw[k+1])
                     total_angle += abs(diff)
-                    # print(f"[DEBUG]     yaw[{k}]={yaw[k]:.2f}, yaw[{k+1}]={yaw[k+1]:.2f}. Diff={diff:.2f}. AbsDiff={abs(diff):.2f}. Current total_angle={total_angle:.2f}")
                 else:
                     # This case means scan_end_idx is the last frame of yaw data, so no yaw[k+1]
                     # The loop structure `range(scan_start_idx, scan_end_idx + 1)` means `k` will go up to `scan_end_idx`.
@@ -463,9 +419,6 @@ def count_scans(yaw_angles,
                     # If `scan_end_idx` is the last frame, this calculation is naturally shorter.
                     # The total_angle will sum changes up to yaw[scan_end_idx-1] to yaw[scan_end_idx].
                     pass # No more differences to add if k is the last frame index
-
-            print(f"[DEBUG]   Calculated total_angle for segment: {total_angle:.2f}°")
-            print(f"[DEBUG]   Minimum required scan_angle: {min_scan_angle}°")
 
             if total_angle >= min_scan_angle:
                 scan_count += 1
@@ -477,11 +430,9 @@ def count_scans(yaw_angles,
             print(f"❌ [RESULT] Segment REJECTED: Frames {scan_start_idx} to {scan_end_idx}. Reason: Segment too short or not extended (no high-velocity frames after start).")
         
         i = j # Move to the next unprocessed high-velocity frame
-        print(f"[DEBUG] Advancing main loop. Next i will be: {i}")
 
-    print(f"\n--- Debugging Finished ---")
+    print(f"\n--- Scanning Finished ---")
     print(f"Final scan_count: {scan_count}")
-    print(f"Detected scan frame ranges: {detected_scan_frames_list}")
     return scan_count
 
 def smooth_scanning(current_orientations, yaw_only_smooth) -> str:

@@ -53,9 +53,9 @@ def generate_auto_hsv_filters(
     colors_to_extract_per_player_crop: int = 1, # if the colour detection is not working properly, consider increasing this to 2 or 3
     hsv_variance: Tuple[int, int, int] = (15, 60, 60), # Current: (H,S,V). Consider (15, 40, 40) for maroon later
     min_s_filter: int = 20, # Min S for the *final generated filter range*. 
-    min_v_filter: int = 20  # Min V for the *final generated filter range*. 
+    min_v_filter: int = 20,  # Min V for the *final generated filter range*. 
+    visualisation = False ## visualise the hsv ranges and cluster plots
 ) -> List[Dict[str, Any]]:
-    print(f"DEBUG: Generating HSV filters automatically using {len(frames)} frames...")
     all_colors: List[Tuple[int, int, int]] = []
 
     for frame_idx, frame in enumerate(frames):
@@ -106,18 +106,8 @@ def generate_auto_hsv_filters(
                 min_pixels_for_kmeans=10 # Consider minimum pixels
             )
             all_colors.extend(dominant_colors_from_crop)
-
-    print(f"DEBUG: Collected {len(all_colors)} HSV samples for clustering.")
-    if not all_colors:
-        print("ERROR: No colors collected from crops. Cannot generate HSV filters.")
-        return []
         
     all_np = np.array(all_colors, dtype=np.float32)
-    print(f"DEBUG: Shape of all_np before pre-filtering: {all_np.shape}")
-
-    if all_np.shape[0] == 0: # Should be caught by the check on all_colors
-        print("ERROR: all_np is empty. Cannot generate filters.")
-        return []
 
     # --- BEGIN PRE-FILTERING STEP for Team-Level KMeans ---
     all_np_to_cluster = all_np # Default to using all samples
@@ -127,38 +117,17 @@ def generate_auto_hsv_filters(
     pre_filter_min_s = 50  # Example: Maroon should be reasonably saturated.
     pre_filter_min_v = 50  # Example: Maroon shouldn't be almost black.
     
-    if all_np.shape[1] == 3: # Ensure it's HSV (3 columns)
-        filter_mask = (all_np[:, 1] >= pre_filter_min_s) & (all_np[:, 2] >= pre_filter_min_v)
-        all_np_pre_filtered = all_np[filter_mask]
-        
-        print(f"DEBUG: Shape of all_np after pre-filtering with S>={pre_filter_min_s}, V>={pre_filter_min_v}: {all_np_pre_filtered.shape}")
-
-        num_teams_to_find = len(team_names) # Typically 2
-
-        if all_np_pre_filtered.shape[0] >= num_teams_to_find: # Check if enough samples left for num_teams clusters
-            all_np_to_cluster = all_np_pre_filtered
-            print(f"DEBUG: Using pre-filtered all_np for team KMeans ({all_np_to_cluster.shape[0]} samples).")
-        else:
-            # Fallback to unfiltered if too few samples remain, but print a warning
-            print(f"WARNING: Pre-filtering left too few samples ({all_np_pre_filtered.shape[0]}) for {num_teams_to_find} teams. Using original unfiltered all_np ({all_np_to_cluster.shape[0]} samples) for team KMeans.")
-    else:
-        print("DEBUG: all_np does not have 3 columns or is empty; skipping pre-filtering. Using original.")
-    # --- END PRE-FILTERING STEP ---
+    filter_mask = (all_np[:, 1] >= pre_filter_min_s) & (all_np[:, 2] >= pre_filter_min_v)
+    all_np_to_cluster = all_np[filter_mask]
+        # --- END PRE-FILTERING STEP ---
 
     num_teams = len(team_names)
     # Determine number of clusters based on available data after potential filtering
     actual_clusters = min(num_teams, all_np_to_cluster.shape[0] if all_np_to_cluster.size > 0 else 0)
 
-    if actual_clusters < num_teams:
-        print(f"WARNING: Not enough distinct color samples ({all_np_to_cluster.shape[0]} after filtering) to find {num_teams} teams. Will find {actual_clusters} team(s).")
-    if actual_clusters == 0:
-        print("ERROR: No color samples available for KMeans clustering after filtering. Cannot generate filters.")
-        return []
-
     kmeans_teams = KMeans(n_clusters=actual_clusters, random_state=0, n_init=10, algorithm='lloyd')
     labels = kmeans_teams.fit_predict(all_np_to_cluster)
     centers = kmeans_teams.cluster_centers_.astype(int)
-    print(f"DEBUG: Team cluster centroids HSV (from {all_np_to_cluster.shape[0]} samples): {centers}")
 
     # Visualizing the clustered data (optional, but highly recommended for debugging)
     # This plotting code should use 'all_np_to_cluster', 'labels', and 'centers'
@@ -198,21 +167,6 @@ def generate_auto_hsv_filters(
         lower_h = int((h_c - h_var)) # Calculate raw lower hue
         upper_h = int((h_c + h_var)) # Calculate raw upper hue
 
-        # Handle hue wraparound for display and range generation
-        # The cv2.inRange will be split in HSVClassifier if lower_h_final > upper_h_final after modulo
-        # For now, we just calculate the effective range, modulo is for keeping it 0-179 conceptually
-        # but the actual range might cross 0.
-        
-        # For the filter definition, we'll store the potentially wrapped values.
-        # The actual splitting logic for cv2.inRange is in HSVClassifier.
-        # Here, we define the range bounds correctly.
-        
-        # Example: center 5, var 10 -> range -5 to 15.
-        # For cv2, this means (0, S, V) to (15, S, V) AND (175, S, V) to (179, S, V)
-        # The lower_h, upper_h for the filter def should reflect this intent.
-        # The current modulo logic handles the numbers but not the split range concept directly.
-        # The critical part is that HSVClassifier handles `lower_h_val[0] > upper_h_val[0]`
-        
         final_lower_h = int((h_c - h_var) % 180)
         final_upper_h = int((h_c + h_var) % 180)
 
@@ -248,7 +202,8 @@ def generate_auto_hsv_filters(
 
     print(f"Final Automatically Generated Filters: {output}")
     # if 'vis' in globals() and callable(vis): # Check if vis is defined
-    vis(output) # Your visualization function
+    if visualisation:
+        vis(output) 
     return output
 
 def vis(updated_color_data):

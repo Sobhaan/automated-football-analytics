@@ -139,8 +139,6 @@ class Match:
                     print("Player ID: ", player.detection.data["id"])
                     keypoints, img = keypoints_pose_solo(frame_np, player, self.detector, self.pose_net)
                     confidence_scores = [kpt[2] for kpt in keypoints]
-                    print("conf", np.average(np.array(confidence_scores[:5])))
-                    print("conf",np.average(np.array(confidence_scores)))
                     if np.average(np.array(confidence_scores[:5])) > 0.3:
                         self.keypoints = keypoints
                         self.img = img
@@ -172,16 +170,11 @@ class Match:
     @staticmethod
     def angles_to_count(angles_lists, initiation_frame, fps):
         relevant_angles = angles_lists[:initiation_frame]
-        print(angles_lists)
         in_advance = 5 * fps
         if in_advance > len(relevant_angles):
             in_advance = angles_lists
-        print(in_advance)
-        print(len(angles_lists))
         relevant_angles = relevant_angles[-int(in_advance):]
-        print(relevant_angles)
         number_of_scans = count_scans(relevant_angles, fps)
-        print(f"Number of scans: {number_of_scans}")
         return number_of_scans
 
 

@@ -25,26 +25,20 @@ DEFAULT_PLAYER_COLOR_PIL = (255, 255, 0) # Yellow RGB
 class Draw:
     @staticmethod
     def rectangle(img: PIL.Image.Image, pt1: tuple, pt2: tuple, color: tuple, thickness: int):
-        try:
-            draw = ImageDraw.Draw(img)
-            # PIL uses RGB, ensure 'color' is RGB tuple e.g. (255, 255, 0) for yellow
-            draw.rectangle([pt1, pt2], outline=color, width=thickness)
-        except Exception as e:
-             print(f"Draw.rectangle error: {e}")
+        draw = ImageDraw.Draw(img)
+        # PIL uses RGB, ensure 'color' is RGB tuple e.g. (255, 255, 0) for yellow
+        draw.rectangle([pt1, pt2], outline=color, width=thickness)
         return img
 
     @staticmethod
     def text(img: PIL.Image.Image, text: str, pos: tuple, color: tuple, text_color: tuple, font_scale: float):
-         try:
-             draw = ImageDraw.Draw(img)
-             # You might need to load a specific font and scale
-             # font = ImageFont.truetype("arial.ttf", size=int(font_scale * 20)) # Example
-             font = ImageFont.load_default() # Basic default font
-             # Simple text draw - does not handle background color easily
-             draw.text(pos, text, fill=text_color, font=font) 
-         except Exception as e:
-             print(f"Draw.text error: {e}")
-         return img
+        draw = ImageDraw.Draw(img)
+        # You might need to load a specific font and scale
+        # font = ImageFont.truetype("arial.ttf", size=int(font_scale * 20)) # Example
+        font = ImageFont.load_default() # Basic default font
+        # Simple text draw - does not handle background color easily
+        draw.text(pos, text, fill=text_color, font=font) 
+        return img
 # --- End Dummy Draw Class ---
 
 
@@ -356,7 +350,6 @@ class Player:
                             # Draw text (no background)
                             draw.text(text_pos, label, fill=DEFAULT_TEXT_COLOR_PIL, font=font) 
                         except Exception as font_e:
-                            print(f"Error loading/drawing font: {font_e}")
                             # Fallback draw without font object
                             draw.text(text_pos, label, fill=DEFAULT_TEXT_COLOR_PIL) 
 
@@ -422,7 +415,6 @@ class Player:
                 origin=(x1+100, y1-100)
                 size=250
                 origin_int = tuple(map(int, origin))
-                print(player.scanning)
                 yaw, pitch, roll = player.scanning
                 pitch_rad = math.radians(pitch)
                 yaw_rad = math.radians(yaw)

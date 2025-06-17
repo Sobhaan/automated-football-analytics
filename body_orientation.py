@@ -37,11 +37,7 @@ class BodyOrientationEstimator:
 
         self.forward_vector = np.array(forward_vector, dtype=float)
         norm = np.linalg.norm(self.forward_vector)
-        if norm > 1e-6:
-            self.forward_angle_rad = math.atan2(self.forward_vector[1], self.forward_vector[0])
-        else:
-            print("Warning: Forward vector has zero length, using default (up).")
-            self.forward_angle_rad = -math.pi / 2 # Angle pointing up
+        self.forward_angle_rad = math.atan2(self.forward_vector[1], self.forward_vector[0])
 
         self.smoothing_window = smoothing_window
         self.pose_conf_threshold = pose_conf_threshold
@@ -65,9 +61,7 @@ class BodyOrientationEstimator:
 
         shoulder_vector = (r_sh - l_sh)
         
-        print(l_conf, r_conf)
         if l_conf < 0.65 or r_conf < 0.65:
-            print("ONLY ONE SHOU8LDER")
             if l_conf > r_conf:
                 perp_vector = np.array((-1, 0))
             else:
@@ -82,7 +76,6 @@ class BodyOrientationEstimator:
         angle_rad = math.acos(cos_theta)
         angle_deg = math.degrees(angle_rad)
         
-        print(angle_deg)
         label = "Half Open"
         if angle_deg < 60:
             label = "Open"
@@ -93,8 +86,6 @@ class BodyOrientationEstimator:
             img = frame.copy()
             # print(kpts)
             h, w = img.shape[:2]
-            print(perp_vector, forward_vector, shoulder_vector)
-            print(kpts)
             for idx, kp in enumerate(kpts):
             # Convert relative coordinates to absolute
                 x_rel, y_rel, conf = kp
