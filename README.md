@@ -25,7 +25,7 @@ The system generates a CSV file with the following data for the selected target 
 ## Installation
 
 ### Prerequisites
-- Python 3.9+
+- Python 3.8.10 
 - CUDA-capable GPU (recommended)
 - Poetry for dependency management
 
@@ -41,6 +41,7 @@ cd soccer-video-analytics
 ```bash
 poetry install
 ```
+There will probably be issues with the gluon library, since they utilize a very old numpy version. Make sure to install that library last. Then update the numpy back to 1.23.0.
 
 3. Download model weights:
    - Place your YOLO player detection model in the weights folder (e.g., `weights/players.pt`)
@@ -147,10 +148,6 @@ Time,Body Position,Pressure,Turnable,Number of scans
 ## Citation
 
 This project builds upon the work from [Tryolabs' blog post on soccer analytics](https://tryolabs.com/blog/2022/10/17/measuring-soccer-ball-possession-ai-video-analytics).
-
-## License
-
-MIT License - see LICENSE.md for details
 
 ## Contributing
 
