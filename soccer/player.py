@@ -61,7 +61,7 @@ class Player:
         self.smoothed_orientation = "Unknown" # Store smoothed orientation string
         self.body_orientation = "Unknown" # Store body orientation string
         self.pressure = "None"
-        self.scanning = "None"
+        self.scanning = None
 
         self.head_orientation = None
         # if detection and isinstance(detection, Detection):
@@ -417,7 +417,6 @@ class Player:
             #if player.detection == "None":
                 continue
             else:
-                print(f"Drawing head orientation for player {player.id}")
                 x1 = int(player.detection.points[0][0]); y1 = int(player.detection.points[0][1])
                 x2 = int(player.detection.points[1][0]); y2 = int(player.detection.points[1][1])
                 origin=(x1+100, y1-100)

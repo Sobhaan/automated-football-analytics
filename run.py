@@ -51,7 +51,7 @@ from norfair.filter import FilterFactory, OptimizedKalmanFilterFactory
 parser = argparse.ArgumentParser(description="Soccer Video Analytics with Target Orientation")
 parser.add_argument(
     "--video",
-    default="../FootieStats/data/BPVU.mp4", # ADJUST PATH AS NEEDED
+    default="../FootieStats/data/alnassr.mp4", # ADJUST PATH AS NEEDED
     type=str,
     help="Path to the input video",
 )
@@ -62,40 +62,17 @@ parser.add_argument(
     "--player_model", default="../FootieStats/weights/players.engine", type=str, help="Path to the player detection model" # ADJUST PATH AS NEEDED
 )
 parser.add_argument(
-    "--pose_model", default='yolov8x-pose-p6.pt', type=str, help="Path to the YOLOv8 Pose model"
-)
-parser.add_argument(
-    "--body_orientation", default=True, type=str, help="Enable body orientation estimation" 
-)
-parser.add_argument(
-    "--scanning", default=True, type=str, help="Enable scanning for target player"
-)
-parser.add_argument(
-    "--all_players", default=True, type=str, help="Track all players or only target player"
-)
-parser.add_argument(
-    "--automatic_teams", default=True, type=str, help="Enable automatic team color detection"
-)
-parser.add_argument(
-    "--pressure", default=True, type=str, help="Enable pressure detection"
-)
-parser.add_argument(
     "--visualize", default=True, type=str, help="Enable visualization of players and ball"
 )
-
 parser.add_argument( 
     "--output", 
-    default="output/bpvutestfullvideo3.mp4", # Default output name
+    default="output/11.mp4", # Default output name
     type=str, 
     help="Path for output video file"
 )
+
 args = parser.parse_args()
 start_time = time.time()
-body_orientation = ast.literal_eval(str(args.body_orientation))
-allplayers = ast.literal_eval(str(args.all_players))
-scanning = ast.literal_eval(str(args.scanning))
-pressure = ast.literal_eval(str(args.pressure))
-automatic_teams = ast.literal_eval(str(args.automatic_teams))
 visualize = ast.literal_eval(str(args.visualize))
 
 # --- Video Setup with Norfair Writing ---
@@ -119,30 +96,29 @@ ball_detector = YoloV8(model_path=args.ball_model)
 print("Object detectors loaded.")
 
 # HSV Filter Arguments
-if args.automatic_teams:
-    temp_video_reader = cv2.VideoCapture(args.video)
-    total_frames = int(temp_video_reader.get(cv2.CAP_PROP_FRAME_COUNT))
+temp_video_reader = cv2.VideoCapture(args.video)
+total_frames = int(temp_video_reader.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    random_frame_indices = sorted(random.sample(range(total_frames), 60))
-    initial_frames_for_filters = []
-    for frame_index in random_frame_indices:
-        temp_video_reader.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
-        ret, frame = temp_video_reader.read()
-        if ret:
-            initial_frames_for_filters.append(frame)
+random_frame_indices = sorted(random.sample(range(total_frames), 60))
+initial_frames_for_filters = []
+for frame_index in random_frame_indices:
+    temp_video_reader.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+    ret, frame = temp_video_reader.read()
+    if ret:
+        initial_frames_for_filters.append(frame)
 
 
-    auto_generated_filters = generate_auto_hsv_filters(
-        player_detector_model=player_detector, # Your initialized player_detector
-        frames=initial_frames_for_filters,
-        team_names=["Team 1", "Team 2"], # Example team names
-        referee_name=None, # Or None if you don't want a referee filter
-    )
-    
-    filter = auto_generated_filters
-    #filter = filters
-    hsv_classifier = HSVClassifier(filters=filter)
-    classifier = InertiaClassifier(classifier=hsv_classifier, inertia=30) 
+auto_generated_filters = generate_auto_hsv_filters(
+    player_detector_model=player_detector, # Your initialized player_detector
+    frames=initial_frames_for_filters,
+    team_names=["Team 1", "Team 2"], # Example team names
+    referee_name=None, # Or None if you don't want a referee filter
+)
+
+filter = auto_generated_filters
+#filter = filters
+hsv_classifier = HSVClassifier(filters=filter)
+classifier = InertiaClassifier(classifier=hsv_classifier, inertia=30) 
 
 team1 = Team(
     name="Team 1",
@@ -200,7 +176,6 @@ id = select_target_player_id_on_first_frame(
         team_module=Team,            # Pass the imported class
         tracker_init_delay_for_selection_frames = player_tracker.initialization_delay
     )
-print(id)
 
 # Add other tunable parameters as arguments if desired  
 smooth_window = 10
@@ -211,7 +186,6 @@ FORWARD_VECTOR = forward_vector() # Adjust based camera angle
 print(f"FORWARD_VECTOR: {FORWARD_VECTOR}")
 estimator = BodyOrientationEstimator(
     target_id=id, 
-    pose_model_path=args.pose_model, 
     forward_vector=FORWARD_VECTOR,
     smoothing_window=smooth_window,      
     pose_conf_threshold=pose_conf, 
@@ -250,7 +224,6 @@ try:
         print(f"Processing frame {i}...") # Debug print
         print(is_in_reselection_phase)
 
-        # if i == 100: break
         if wait_frames_countdown > 0:
             print(f"Waiting... {wait_frames_countdown} frames remaining.")
             wait_frames_countdown -= 1
@@ -335,11 +308,10 @@ try:
             print(f"Target ID {id} officially lost (exceeded hit_counter_max).")
             is_in_reselection_phase = True
         
-        if automatic_teams:
-            player_detections = classifier.predict_from_detections(
-                detections=player_detections_tracked, # Pass the list of Norfair/Converter Detection objects
-                img=frame_np
-            )
+        player_detections = classifier.predict_from_detections(
+            detections=player_detections_tracked, # Pass the list of Norfair/Converter Detection objects
+            img=frame_np
+        )
         
         count = 0
         current_frame_track_ids = set()
@@ -354,10 +326,7 @@ try:
         ball = get_main_ball(ball_detections_tracked)
         
 
-        if automatic_teams:
-            players = Player.from_detections(detections=player_detections, teams=teams)
-        else:
-            players = Player.from_detections(detections=player_detections_tracked, teams=teams)
+        players = Player.from_detections(detections=player_detections, teams=teams)
 
         match.update(players, ball, i, scan_angles_list, frame_np, target_id=id, estimator=estimator)
         body_position_list, pressure_list, turnable_list, scan_angles_list = update_lists(players, id, body_position_list, pressure_list, turnable_list, scan_angles_list)
@@ -393,26 +362,23 @@ try:
                 target_player_id=id, # Pass target ID
             )
 
-            if pressure:
-                frame_pil = Player.draw_pressure(
-                    players=players,
-                    frame=frame_pil,
-                    target_id=id,
-                )
+            frame_pil = Player.draw_pressure(
+                players=players,
+                frame=frame_pil,
+                target_id=id,
+            )
 
-            if body_orientation:
-                frame_pil = Player.draw_body_orientation(
-                    players=players,
-                    frame=frame_pil,
-                    target_id=id,
-                )
+            frame_pil = Player.draw_body_orientation(
+                players=players,
+                frame=frame_pil,
+                target_id=id,
+            )
             
-            if scanning:
-                frame_pil = Player.draw_scanning(
-                    players=players,
-                    frame=frame_pil,
-                    target_id=id,
-                )
+            frame_pil = Player.draw_scanning(
+                players=players,
+                frame=frame_pil,
+                target_id=id,
+            )
 
             # Draw ball (optional)
             if ball:

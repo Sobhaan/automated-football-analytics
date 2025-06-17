@@ -21,7 +21,6 @@ def angle_difference(angle1_rad, angle2_rad):
 # --- Estimator Class for a SINGLE Target ID ---
 class BodyOrientationEstimator:
     def __init__(self, target_id: int,
-                 pose_model_path='yolov8x-pose-p6.pt',
                  forward_vector=(-1, 0.4),
                  smoothing_window=5,
                  pose_conf_threshold=0.5, # Confidence for pose detection WITHIN the crop
@@ -35,13 +34,6 @@ class BodyOrientationEstimator:
         print(f"Initializing Orientation Estimator for Target ID: {target_id}")
         self.target_id = target_id
 
-        print(f"Loading Pose Model from: {pose_model_path}")
-        try:
-            self.pose_model = YOLO(pose_model_path)
-            print("Pose Model Loaded.")
-        except Exception as e:
-            print(f"ERROR: Failed to load pose model '{pose_model_path}': {e}")
-            raise # Re-raise the exception
 
         self.forward_vector = np.array(forward_vector, dtype=float)
         norm = np.linalg.norm(self.forward_vector)
@@ -63,7 +55,7 @@ class BodyOrientationEstimator:
         self.CLOSED_THRESHOLD_RAD = 7 * math.pi / 8.0 # ~157.5 deg
 
     def _calculate_single_orientation(self, frame, kpts: np.ndarray, forward_vector =(-0.9978, -0.0665),
-                                        prev_shoulder_vector=[0,0]) -> str:
+                                        prev_shoulder_vector=[0,0], visualisation = False) -> str:
         
         if kpts is None or len(kpts) < 7:
             print("ERROR: Not enough keypoints to calculate orientation.")
@@ -97,52 +89,53 @@ class BodyOrientationEstimator:
         elif angle_deg > 100:
             label = "Closed"
 
-        # img = frame.copy()
-        # # print(kpts)
-        # h, w = img.shape[:2]
-        # print(perp_vector, forward_vector, shoulder_vector)
-        # print(kpts)
-        # for idx, kp in enumerate(kpts):
-        # # Convert relative coordinates to absolute
-        #     x_rel, y_rel, conf = kp
+        if visualisation:
+            img = frame.copy()
+            # print(kpts)
+            h, w = img.shape[:2]
+            print(perp_vector, forward_vector, shoulder_vector)
+            print(kpts)
+            for idx, kp in enumerate(kpts):
+            # Convert relative coordinates to absolute
+                x_rel, y_rel, conf = kp
 
-        #     # Draw the keypoint
-        #     # Calculate the end point for the shoulder_vector line
-        #     start_draw_point_x = w // 2
-        #     start_draw_point_y = h // 2
-        #     start_draw_point = (start_draw_point_x, start_draw_point_y-10)
-        #     end_point_shoulder_x = start_draw_point_x + int(shoulder_vector[0] * 20)
-        #     end_point_shoulder_y = start_draw_point_y + int(shoulder_vector[1] * 20)
-        #     end_point_shoulder = (end_point_shoulder_x, end_point_shoulder_y)
+                # Draw the keypoint
+                # Calculate the end point for the shoulder_vector line
+                start_draw_point_x = w // 2
+                start_draw_point_y = h // 2
+                start_draw_point = (start_draw_point_x, start_draw_point_y-10)
+                end_point_shoulder_x = start_draw_point_x + int(shoulder_vector[0] * 20)
+                end_point_shoulder_y = start_draw_point_y + int(shoulder_vector[1] * 20)
+                end_point_shoulder = (end_point_shoulder_x, end_point_shoulder_y)
 
-        #     # Calculate the end point for the perp_vector line
-        #     end_point_perp_x = start_draw_point_x + int(perp_vector[0] * 20)
-        #     end_point_perp_y = start_draw_point_y + int(perp_vector[1] * 20)
-        #     end_point_perp = (end_point_perp_x, end_point_perp_y)
+                # Calculate the end point for the perp_vector line
+                end_point_perp_x = start_draw_point_x + int(perp_vector[0] * 20)
+                end_point_perp_y = start_draw_point_y + int(perp_vector[1] * 20)
+                end_point_perp = (end_point_perp_x, end_point_perp_y)
 
-        #     end_forward_x = start_draw_point_x + int(forward_vector[0] * 20)
-        #     end_forward_y = start_draw_point_y + int(forward_vector[1] * 20)
-        #     end_forward = (end_forward_x, end_forward_y)
-        #     cv2.circle(img, (int(x_rel), int(y_rel)), 2, (0,255,0), 1)
-        #     cv2.line(img, start_draw_point, end_point_perp, (255,0,0), 1)
-        #     cv2.line(img, start_draw_point, end_forward, (0,255,0), 1)
-        #     cv2.line(img, start_draw_point, end_point_shoulder, (0,0,255), 1)
-        #     # Optionally, you can label the keypoint index
-        #     if not math.isnan(float(angle_deg)): 
-        #         txt = str(int(angle_deg))
-        #     else:
-        #         txt = "NAN"
-        #     cv2.putText(img, txt, start_draw_point, cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,0), 1, cv2.LINE_AA)
-        #     cv2.putText(img, str(idx), (int(x_rel), int(y_rel)),
-        #                 cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255,255,255), 1, cv2.LINE_AA)
-        # img = cv2.resize(
-        #     img,
-        #     (int(w * 4), int(h * 4)),
-        #     interpolation=cv2.INTER_LINEAR
-        # )
-        # cv2.imshow('Keypoints', img)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
+                end_forward_x = start_draw_point_x + int(forward_vector[0] * 20)
+                end_forward_y = start_draw_point_y + int(forward_vector[1] * 20)
+                end_forward = (end_forward_x, end_forward_y)
+                # cv2.circle(img, (int(x_rel), int(y_rel)), 2, (0,255,0), 1)
+                cv2.line(img, start_draw_point, end_point_perp, (255,0,0), 1)
+                cv2.line(img, start_draw_point, end_forward, (0,255,0), 1)
+                cv2.line(img, start_draw_point, end_point_shoulder, (0,0,255), 1)
+                # Optionally, you can label the keypoint index
+                if not math.isnan(float(angle_deg)): 
+                    txt = str(int(angle_deg))
+                else:
+                    txt = "NAN"
+                # cv2.putText(img, txt, start_draw_point, cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,0), 1, cv2.LINE_AA)
+                # cv2.putText(img, str(idx), (int(x_rel), int(y_rel)),
+                #             cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255,255,255), 1, cv2.LINE_AA)
+            img = cv2.resize(
+                img,
+                (int(w * 4), int(h * 4)),
+                interpolation=cv2.INTER_LINEAR
+            )
+            cv2.imshow('Keypoints', img)
+            cv2.waitKey(0)
+            cv2.destroyAllWindows()
         return label, shoulder_vector
 
     def _smooth_orientation(self, current_orientation: str) -> str:

@@ -295,28 +295,33 @@ def keypoints_pose_solo(image, player, detector, pose_net, visualisation=False):
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     end_time = time.time()
     print(f"Keypoint extraction took {end_time - start_tim2e:.4f} seconds")
-    # h, w = img.shape[:2]
-    # print(h,w)
-    # print(kpts)
-    # for idx, kp in enumerate(kpts):
-    # # Convert relative coordinates to absolute
-    #     # if idx < 5:
-    #         x_rel, y_rel, conf = kp
+    if visualisation:
+        h, w = img.shape[:2]
+        print(h,w)
+        print(kpts)
+        for idx, kp in enumerate(kpts):
+        # Convert relative coordinates to absolute
+            if idx < 7:
+                x_rel, y_rel, conf = kp
 
-    #         # Draw the keypoint
-    #         # Calculate the end point for the shoulder_vector line
-    #         start_draw_point_x = w // 2
-    #         start_draw_point_y = h // 2
-    #         cv2.circle(img, (int(x_rel), int(y_rel)), 1, (0,255,0), 1)
-    #         # Optionally, you can label the keypoint index
-
-    #         #cv2.putText(img, txt, start_draw_point, cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,0), 1, cv2.LINE_AA)
-    #         cv2.putText(img, str(idx), (int(x_rel), int(y_rel)),
-    #                     cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255,255,255), 1, cv2.LINE_AA)
-
-    # cv2.imshow('Keypoints', img)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
+                # Draw the keypoint
+                # Calculate the end point for the shoulder_vector line
+                start_draw_point_x = w // 2
+                start_draw_point_y = h // 2
+                start_draw_point = (start_draw_point_x, start_draw_point_y-10)
+                cv2.circle(img, (int(x_rel), int(y_rel)), 1, (0,255,0), 1)
+                # Optionally, you can label the keypoint index
+                # cv2.putText(img, txt, start_draw_point, cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,0), 1, cv2.LINE_AA)
+                cv2.putText(img, str(idx), (int(x_rel), int(y_rel)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255,255,255), 1, cv2.LINE_AA)
+        img = cv2.resize(
+                img,
+                (int(w * 4), int(h * 4)),
+                interpolation=cv2.INTER_LINEAR
+            )
+        cv2.imshow('Keypoints', img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
     return kpts, img
 
 def calculate_angular_difference(angle1, angle2):

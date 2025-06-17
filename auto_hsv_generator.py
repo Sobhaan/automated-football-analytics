@@ -50,11 +50,10 @@ def generate_auto_hsv_filters(
     team_names: List[str] = ["Team 1", "Team 2"],
     referee_name: Optional[str] = "Referee",
     detections_conf_threshold: float = 0.4,
-    colors_to_extract_per_player_crop: int = 2, # User confirmed 2 is good
-    colors_to_define_per_team: int = 1, # This param seems unused in the color_def creation
+    colors_to_extract_per_player_crop: int = 1, # if the colour detection is not working properly, consider increasing this to 2 or 3
     hsv_variance: Tuple[int, int, int] = (15, 60, 60), # Current: (H,S,V). Consider (15, 40, 40) for maroon later
-    min_s_filter: int = 20, # Min S for the *final generated filter range*. Consider ~50-70 for maroon.
-    min_v_filter: int = 20  # Min V for the *final generated filter range*. Consider ~50-70 for maroon.
+    min_s_filter: int = 20, # Min S for the *final generated filter range*. 
+    min_v_filter: int = 20  # Min V for the *final generated filter range*. 
 ) -> List[Dict[str, Any]]:
     print(f"DEBUG: Generating HSV filters automatically using {len(frames)} frames...")
     all_colors: List[Tuple[int, int, int]] = []
