@@ -18,6 +18,7 @@ from itertools import islice
 from gluoncv import model_zoo, data, utils
 import mxnet as mx
 from collections import deque, Counter
+from ultralytics import YOLO
 
 
 
@@ -46,6 +47,7 @@ class Match:
         self.ball = None
         self.detector = model_zoo.get_model('yolo3_mobilenet1.0_coco', pretrained=True, ctx=mx.gpu(0))
         self.pose_net = model_zoo.get_model('simple_pose_resnet152_v1d', pretrained=True, ctx=mx.gpu(0))
+        # self.pose_net = YOLO("yolov8x-pose-p6.pt")
         self.detector.reset_class(["person"], reuse_weights=['person'])
         self.keypoints = [[]]
         self.img = None
@@ -60,7 +62,7 @@ class Match:
         self.pass_event = PassEvent()
         self.smooth_scan: deque = deque(maxlen=5)
 
-    def update(self, players: List[Player], ball: Ball, frame_idx: int, scanning: List, frame_np: np.ndarray = None, 
+    def update(self, players: List[Player], ball: Ball, frame_idx: int, frame_np: np.ndarray = None, 
                 target_id: int = 0, estimator: BodyOrientationEstimator = None):
         """
 
@@ -79,9 +81,9 @@ class Match:
         self.update_body_orientation(
             players=players, frame_np=frame_np, target=target_id, estimator=estimator)
 
-        self.update_scanning(
-            players=players, frame_np=frame_np, target=target_id, scan_angles_lists=scanning
-        )
+        # self.update_scanning(
+        #     players=players, frame_np=frame_np, target=target_id, scan_angles_lists=scanning
+        # )
         
         self.update_possession()
             

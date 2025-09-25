@@ -51,11 +51,11 @@ from auto_id import select_target_player_id_on_first_frame
 def parse_arguments():
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(description="Soccer Video Analytics with Target Orientation")
-    parser.add_argument("--video", default="../FootieStats/data/alnassr.mp4", type=str, help="Path to the input video")
+    parser.add_argument("--video", default="../FootieStats/data/HugoSaves2.mp4", type=str, help="Path to the input video")
     parser.add_argument("--ball_model", default="../FootieStats/weights/ball.engine", type=str, help="Path to the ball detection model")
     parser.add_argument("--player_model", default="../FootieStats/weights/players.engine", type=str, help="Path to the player detection model")
     parser.add_argument("--visualize", default=True, type=str, help="Enable visualization of players and ball")
-    parser.add_argument("--output", default="output/11.mp4", type=str, help="Path for output video file")
+    parser.add_argument("--output", default="output/dort.mp4", type=str, help="Path for output video file")
     return parser.parse_args()
 
 
@@ -79,7 +79,7 @@ def setup_video(args):
 def load_models(args):
     """Load detection models"""
     print("Loading object detectors...")
-    player_conf = 0.4
+    player_conf = 0.1
     player_detector = YoloV8(model_path=args.player_model, conf=player_conf)
     ball_detector = YoloV8(model_path=args.ball_model)
     print("Object detectors loaded.")
@@ -162,9 +162,9 @@ def draw_frame_visualizations(frame_np, players, ball, id, FORWARD_VECTOR, frame
     frame_pil = PIL.Image.fromarray(cv2.cvtColor(frame_np, cv2.COLOR_BGR2RGB))
     
     frame_pil = Player.draw_players(players=players, frame=frame_pil, id=True, target_player_id=id)
-    frame_pil = Player.draw_pressure(players=players, frame=frame_pil, target_id=id)
+    # frame_pil = Player.draw_pressure(players=players, frame=frame_pil, target_id=id)
     frame_pil = Player.draw_body_orientation(players=players, frame=frame_pil, target_id=id)
-    frame_pil = Player.draw_scanning(players=players, frame=frame_pil, target_id=id)
+    # frame_pil = Player.draw_scanning(players=players, frame=frame_pil, target_id=id)
     
     if ball:
         frame_pil = ball.draw(frame_pil)
@@ -240,14 +240,14 @@ def main():
     body_position_list = []
     pressure_list = []
     turnable_list = []
-    scan_angles_list = []
+    # scan_angles_list = []
     
     # Final target values
     time_list = []
     target_bp = []
     target_pressure = []
     target_turnable = []
-    target_number_of_scans = []
+    # target_number_of_scans = []
     
     # Main processing loop
     print("\nStarting video processing...")
@@ -350,7 +350,6 @@ def main():
             )
             
             # Clean up stale players
-            count = 0
             current_frame_track_ids = set()
             lost_track_ids = set(active_players.keys()) - current_frame_track_ids
             for track_id in lost_track_ids:
@@ -362,11 +361,11 @@ def main():
             players = Player.from_detections(detections=player_detections, teams=teams)
             
             # Update match state
-            match.update(players, ball, i, scan_angles_list, frame_np, target_id=id, estimator=estimator)
+            match.update(players, ball, i, frame_np, target_id=id, estimator=estimator)
             
             # Update lists
-            body_position_list, pressure_list, turnable_list, scan_angles_list = update_lists(
-                players, id, body_position_list, pressure_list, turnable_list, scan_angles_list
+            body_position_list, pressure_list, turnable_list = update_lists(
+                players, id, body_position_list, pressure_list, turnable_list
             )
             
             # Check for passes
@@ -380,8 +379,8 @@ def main():
                             target_bp.append(body_position_list[passs.initiation_frame])
                             target_pressure.append(pressure_list[passs.initiation_frame])
                             target_turnable.append(turnable_list[passs.initiation_frame])
-                            number_of_scans = Match.angles_to_count(scan_angles_list, passs.initiation_frame, fps)
-                            target_number_of_scans.append(number_of_scans)
+                            # number_of_scans = Match.angles_to_count(scan_angles_list, passs.initiation_frame, fps)
+                            # target_number_of_scans.append(number_of_scans)
                             target_pass_list.append(passs)
                             print(f"Target Player {id} received a pass at frame {passs.initiation_frame}. Body Position: {body_position_list[passs.initiation_frame]}, Pressure: {pressure_list[passs.initiation_frame]}, Turnable: {turnable_list[passs.initiation_frame]}, Number of Scans: {number_of_scans}")
             old_passes = passes_list
@@ -400,7 +399,6 @@ def main():
             body_position=target_bp,
             pressure=target_pressure,
             turnable=target_turnable,
-            number_of_scans=target_number_of_scans
         )
         df.to_csv(args.output.replace(".mp4", ".csv"))
         print(f"Output video should be saved to {args.output} by Norfair.")
