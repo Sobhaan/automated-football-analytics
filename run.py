@@ -162,8 +162,6 @@ def draw_frame_visualizations(frame_np, players, ball, id, FORWARD_VECTOR, frame
     frame_pil = PIL.Image.fromarray(cv2.cvtColor(frame_np, cv2.COLOR_BGR2RGB))
     
     frame_pil = Player.draw_players(players=players, frame=frame_pil, id=True, target_player_id=id)
-    frame_pil = Player.draw_pressure(players=players, frame=frame_pil, target_id=id)
-    frame_pil = Player.draw_body_orientation(players=players, frame=frame_pil, target_id=id)
     frame_pil = Player.draw_scanning(players=players, frame=frame_pil, target_id=id)
     
     if ball:
@@ -219,13 +217,13 @@ def main():
     crop_pad = 0
     FORWARD_VECTOR = forward_vector()
     
-    estimator = BodyOrientationEstimator(
-        target_id=id,
-        forward_vector=FORWARD_VECTOR,
-        smoothing_window=smooth_window,
-        pose_conf_threshold=pose_conf,
-        crop_padding_pixels=crop_pad
-    )
+    # estimator = BodyOrientationEstimator(
+    #     target_id=id,
+    #     forward_vector=FORWARD_VECTOR,
+    #     smoothing_window=smooth_window,
+    #     pose_conf_threshold=pose_conf,
+    #     crop_padding_pixels=crop_pad
+    # )
     
     # State variables
     target_missing_frames_count = 0
@@ -237,16 +235,12 @@ def main():
     target_pass_list = []
     
     # Value lists
-    body_position_list = []
     pressure_list = []
-    turnable_list = []
     scan_angles_list = []
     
     # Final target values
     time_list = []
-    target_bp = []
     target_pressure = []
-    target_turnable = []
     target_number_of_scans = []
     
     # Main processing loop
@@ -299,13 +293,13 @@ def main():
                     print(f"New Target ID selected: {id}")
                     FORWARD_VECTOR = forward_vector()
                     target_missing_frames_count = 0
-                    estimator = BodyOrientationEstimator(
-                        target_id=id,
-                        forward_vector=FORWARD_VECTOR,
-                        smoothing_window=smooth_window,
-                        pose_conf_threshold=pose_conf,
-                        crop_padding_pixels=crop_pad
-                    )
+                    # estimator = BodyOrientationEstimator(
+                    #     target_id=id,
+                    #     forward_vector=FORWARD_VECTOR,
+                    #     smoothing_window=smooth_window,
+                    #     pose_conf_threshold=pose_conf,
+                    #     crop_padding_pixels=crop_pad
+                    # )
             
             frame_count = i
             
@@ -362,11 +356,11 @@ def main():
             players = Player.from_detections(detections=player_detections, teams=teams)
             
             # Update match state
-            match.update(players, ball, i, scan_angles_list, frame_np, target_id=id, estimator=estimator)
+            match.update(players, ball, i, scan_angles_list, frame_np, target_id=id)
             
             # Update lists
-            body_position_list, pressure_list, turnable_list, scan_angles_list = update_lists(
-                players, id, body_position_list, pressure_list, turnable_list, scan_angles_list
+            pressure_list, scan_angles_list = update_lists(
+                players, id, pressure_list, scan_angles_list
             )
             
             # Check for passes
@@ -377,13 +371,11 @@ def main():
                         print(f"Pass Detected! {passs.passer_id} -> {passs.receiver_id}. Initiated around frame {passs.initiation_frame}.")
                         if id == passs.receiver_id:
                             time_list.append(passs.initiation_frame * (1/fps))
-                            target_bp.append(body_position_list[passs.initiation_frame])
                             target_pressure.append(pressure_list[passs.initiation_frame])
-                            target_turnable.append(turnable_list[passs.initiation_frame])
                             number_of_scans = Match.angles_to_count(scan_angles_list, passs.initiation_frame, fps)
                             target_number_of_scans.append(number_of_scans)
                             target_pass_list.append(passs)
-                            print(f"Target Player {id} received a pass at frame {passs.initiation_frame}. Body Position: {body_position_list[passs.initiation_frame]}, Pressure: {pressure_list[passs.initiation_frame]}, Turnable: {turnable_list[passs.initiation_frame]}, Number of Scans: {number_of_scans}")
+                            print(f"Target Player {id} received a pass at frame {passs.initiation_frame}, Pressure: {pressure_list[passs.initiation_frame]}, Number of Scans: {number_of_scans}")
             old_passes = passes_list
             
             # Visualization
@@ -397,9 +389,7 @@ def main():
         # Save output
         df = generate_output_df(
             time=time_list,
-            body_position=target_bp,
             pressure=target_pressure,
-            turnable=target_turnable,
             number_of_scans=target_number_of_scans
         )
         df.to_csv(args.output.replace(".mp4", ".csv"))

@@ -61,7 +61,7 @@ class Match:
         self.smooth_scan: deque = deque(maxlen=5)
 
     def update(self, players: List[Player], ball: Ball, frame_idx: int, scanning: List, frame_np: np.ndarray = None, 
-                target_id: int = 0, estimator: BodyOrientationEstimator = None):
+                target_id: int = 0):
         """
 
         Update match possession and closest player
@@ -76,8 +76,8 @@ class Match:
         self.update_pressure(
             players=players)
         
-        self.update_body_orientation(
-            players=players, frame_np=frame_np, target=target_id, estimator=estimator)
+        # self.update_body_orientation(
+        #     players=players, frame_np=frame_np, target=target_id, estimator=estimator)
 
         self.update_scanning(
             players=players, frame_np=frame_np, target=target_id, scan_angles_lists=scanning
