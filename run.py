@@ -384,7 +384,6 @@ def main():
                             target_pass_list.append(passs)
                             print(f"Target Player {id} received a pass at frame {passs.initiation_frame}. Body Position: {body_position_list[passs.initiation_frame]}, Pressure: {pressure_list[passs.initiation_frame]}, Turnable: {turnable_list[passs.initiation_frame]}, Number of Scans: {number_of_scans}")
             old_passes = passes_list
-            
             # Visualization
             if visualize:
                 frame_final = draw_frame_visualizations(frame_np, players, ball, id, FORWARD_VECTOR, frame_count)
