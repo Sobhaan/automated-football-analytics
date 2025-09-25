@@ -7,7 +7,6 @@ def generate_output_df(time, body_position, pressure, turnable):
         'Body Position': body_position,
         'Pressure': pressure,
         'Turnable': turnable,
-        # 'Number of scans ': number_of_scans
     })
     return df
 
@@ -22,7 +21,6 @@ def update_lists(players, target_id, body_position, pressure, turnable):
                 turnable.append("No")
             else:
                 turnable.append("Yes")
-            # number_of_scans.append(player.scanning)
             found = True
             break
 
@@ -30,5 +28,4 @@ def update_lists(players, target_id, body_position, pressure, turnable):
         body_position.append(body_position[-1])
         pressure.append(pressure[-1])
         turnable.append(turnable[-1])
-        number_of_scans.append(number_of_scans[-1])
-    return body_position, pressure, turnable, number_of_scans
+    return body_position, pressure, turnable

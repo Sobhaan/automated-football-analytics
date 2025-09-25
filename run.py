@@ -240,14 +240,12 @@ def main():
     body_position_list = []
     pressure_list = []
     turnable_list = []
-    # scan_angles_list = []
     
     # Final target values
     time_list = []
     target_bp = []
     target_pressure = []
     target_turnable = []
-    # target_number_of_scans = []
     
     # Main processing loop
     print("\nStarting video processing...")
@@ -379,10 +377,8 @@ def main():
                             target_bp.append(body_position_list[passs.initiation_frame])
                             target_pressure.append(pressure_list[passs.initiation_frame])
                             target_turnable.append(turnable_list[passs.initiation_frame])
-                            # number_of_scans = Match.angles_to_count(scan_angles_list, passs.initiation_frame, fps)
-                            # target_number_of_scans.append(number_of_scans)
                             target_pass_list.append(passs)
-                            print(f"Target Player {id} received a pass at frame {passs.initiation_frame}. Body Position: {body_position_list[passs.initiation_frame]}, Pressure: {pressure_list[passs.initiation_frame]}, Turnable: {turnable_list[passs.initiation_frame]}, Number of Scans: {number_of_scans}")
+                            print(f"Target Player {id} received a pass at frame {passs.initiation_frame}. Body Position: {body_position_list[passs.initiation_frame]}, Pressure: {pressure_list[passs.initiation_frame]}, Turnable: {turnable_list[passs.initiation_frame]}")
             old_passes = passes_list
             # Visualization
             if visualize:

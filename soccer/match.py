@@ -81,10 +81,6 @@ class Match:
         self.update_body_orientation(
             players=players, frame_np=frame_np, target=target_id, estimator=estimator)
 
-        # self.update_scanning(
-        #     players=players, frame_np=frame_np, target=target_id, scan_angles_lists=scanning
-        # )
-        
         self.update_possession()
             
         if ball is None or ball.detection is None or len(players)==0:
